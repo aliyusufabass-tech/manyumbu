@@ -69,6 +69,7 @@ from .phase4_views import (
     StoryViewersView,
     StoryViewView,
 )
+from .phase8_views import AccountDeletionView, DataExportView
 from .post_views import (
     AdminPostManagementView,
     ArchivedPostsView,
@@ -123,6 +124,8 @@ urlpatterns = [
     path("auth/forgot-password/", ForgotPasswordView.as_view(), name="auth-forgot-password"),
     path("auth/reset-password/", ResetPasswordView.as_view(), name="auth-reset-password"),
     path("auth/google/start/", GoogleAuthStartView.as_view(), name="auth-google-start"),
+    path("data-export/", DataExportView.as_view(), name="data-export"),
+    path("account-deletion/", AccountDeletionView.as_view(), name="account-deletion"),
     path("profiles/me/", MeProfileView.as_view(), name="profile-me"),
     path("profiles/me/media/", ProfileMediaView.as_view(), name="profile-media"),
     path("profiles/search/", SearchProfilesView.as_view(), name="profile-search"),
@@ -163,7 +166,8 @@ urlpatterns = [
     path("admin/professional-accounts/", AdminPhaseSevenView.as_view(), {"kind": "professional-accounts"}, name="admin-professional-accounts"),
     path("admin/professional-accounts/<str:username>/<str:action>/", AdminPhaseSevenView.as_view(), {"kind": "professional-accounts"}, name="admin-professional-action"),
     path("admin/users/<str:username>/restrictions/", AdminPhaseSevenView.as_view(), {"kind": "users", "action": "restrictions"}, name="admin-user-restrictions"),
-    path("admin/users/<str:username>/restrictions/<int:object_id>/", AdminPhaseSevenView.as_view(), {"kind": "users"}, name="admin-user-restriction-delete"),    path("groups/", GroupListView.as_view(), name="group-list"),
+    path("admin/users/<str:username>/restrictions/<int:object_id>/", AdminPhaseSevenView.as_view(), {"kind": "users"}, name="admin-user-restriction-delete"),
+    path("groups/", GroupListView.as_view(), name="group-list"),
     path("groups/<uuid:group_id>/", GroupDetailView.as_view(), name="group-detail"),
     path("groups/<uuid:group_id>/members/", GroupMembersView.as_view(), name="group-members"),
     path("groups/<uuid:group_id>/members/<str:user_identifier>/", GroupMembersView.as_view(), name="group-member-detail"),
@@ -202,7 +206,8 @@ urlpatterns = [
     path("devices/", DeviceView.as_view(), name="user-devices"),
     path("admin/message-reports/", AdminMessageReportView.as_view(), name="admin-message-reports"),
     path("admin/message-reports/<str:report_kind>/<int:report_id>/<str:action>/", AdminMessageReportView.as_view(), name="admin-message-report-action"),
-    path("stories/", StoryCollectionView.as_view(), name="story-create"),    path("stories/tray/", StoryTrayView.as_view(), name="story-tray"),
+    path("stories/", StoryCollectionView.as_view(), name="story-create"),
+    path("stories/tray/", StoryTrayView.as_view(), name="story-tray"),
     path("stories/<uuid:story_id>/", StoryDetailView.as_view(), name="story-detail"),
     path("stories/<uuid:story_id>/view/", StoryViewView.as_view(), name="story-view"),
     path("stories/<uuid:story_id>/viewers/", StoryViewersView.as_view(), name="story-viewers"),

@@ -1142,3 +1142,93 @@ class PhaseSevenCallSignalingTests(TransactionTestCase):
         async_to_sync(self.signaling_flow)()
         self.assertTrue(CallSignalEvent.objects.filter(call=self.call, event_name="call.offer").exists())
         async_to_sync(self.nonparticipant_flow)()
+
+from django.core.exceptions import ImproperlyConfigured
+from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.test import override_settings
+
+from myproject.env_validation import validate_production_environment
+from .models import AccountDeletionRequest, DataExportRequest, OperationalEvent, UserSession
+from .phase8_services import create_data_export_request, sanitize_metadata
+from .tasks import process_media_asset
+
+
+class PhaseEightProductionReadinessTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user = get_user_model().objects.create_user(
+            phone_number="+255799900001",
+            email="phase8@example.com",
+            username="phase8user",
+            full_name="Phase Eight User",
+            date_of_birth="1995-01-01",
+            password="StrongerPass123!",
+            is_active=True,
+            is_email_verified=True,
+        )
+        ensure_profile_records(self.user)
+        self.tokens = issue_tokens(self.user)
+
+    def auth(self):
+        return {"HTTP_AUTHORIZATION": f"Bearer {self.tokens['access']}"}
+
+    def post_json(self, url, payload=None):
+        return self.client.post(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth())
+
+    def test_health_and_readiness_endpoints(self):
+        self.assertEqual(self.client.get("/health/").status_code, 200)
+        self.assertEqual(self.client.get("/health/live/").status_code, 200)
+        response = self.client.get("/health/ready/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["checks"]["database"])
+
+    def test_production_environment_validation(self):
+        with self.assertRaises(ImproperlyConfigured):
+            validate_production_environment({"MANYUMBU_ENV": "production"})
+        complete_env = {name: "configured" for name in [
+            "DJANGO_SECRET_KEY", "DATABASE_URL", "REDIS_URL", "DJANGO_ALLOWED_HOSTS", "CSRF_TRUSTED_ORIGINS",
+            "EMAIL_HOST", "EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD", "DEFAULT_FROM_EMAIL",
+            "MANYUMBU_STUN_SERVERS", "MANYUMBU_TURN_SERVER", "MANYUMBU_TURN_USERNAME", "MANYUMBU_TURN_PASSWORD",
+        ]}
+        complete_env["MANYUMBU_ENV"] = "production"
+        self.assertEqual(validate_production_environment(complete_env), [])
+
+    def test_data_export_requires_recent_auth_and_is_idempotent(self):
+        denied = self.post_json("/api/v1/data-export/", {"recent_auth_confirmed": False})
+        self.assertEqual(denied.status_code, 403)
+        created = self.post_json("/api/v1/data-export/", {"recent_auth_confirmed": True})
+        self.assertEqual(created.status_code, 201, created.content)
+        again = self.post_json("/api/v1/data-export/", {"recent_auth_confirmed": True})
+        self.assertEqual(again.status_code, 200, again.content)
+        self.assertEqual(DataExportRequest.objects.filter(user=self.user).count(), 1)
+        listing = self.client.get("/api/v1/data-export/", **self.auth())
+        self.assertEqual(listing.status_code, 200)
+
+    def test_account_deletion_requires_recent_auth_revokes_sessions_and_can_cancel(self):
+        denied = self.post_json("/api/v1/account-deletion/", {"recent_auth_confirmed": False})
+        self.assertEqual(denied.status_code, 403)
+        created = self.post_json("/api/v1/account-deletion/", {"recent_auth_confirmed": True, "reason": "leaving"})
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertTrue(UserSession.objects.filter(user=self.user, revoked_at__isnull=False).exists())
+        cancelled = self.client.delete("/api/v1/account-deletion/", **self.auth())
+        self.assertEqual(cancelled.status_code, 200, cancelled.content)
+        self.assertEqual(AccountDeletionRequest.objects.get(user=self.user).status, AccountDeletionRequest.STATUS_CANCELLED)
+
+    def test_operational_metadata_is_redacted(self):
+        cleaned = sanitize_metadata({"password": "secret", "nested": {"token": "abc", "safe": "ok"}})
+        self.assertEqual(cleaned["password"], "[redacted]")
+        self.assertEqual(cleaned["nested"]["token"], "[redacted]")
+        self.assertEqual(cleaned["nested"]["safe"], "ok")
+
+    @override_settings(MANYUMBU_ENV="production")
+    def test_seed_demo_data_refuses_production_without_override(self):
+        with self.assertRaises(CommandError):
+            call_command("seed_demo_data")
+
+    def test_media_processing_reports_missing_or_available_ffmpeg(self):
+        result = process_media_asset("uploads/test.mp4")
+        self.assertIn(result["status"], {"ready", "skipped"})
+        if result["status"] == "skipped":
+            self.assertEqual(result["reason"], "ffmpeg_unavailable")
+            self.assertTrue(OperationalEvent.objects.filter(event_type="media_processing_unavailable").exists())

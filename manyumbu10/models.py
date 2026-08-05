@@ -1958,3 +1958,60 @@ class BusinessContactAction(models.Model):
         indexes = [models.Index(fields=["professional_account", "created_at"])]
 
 
+
+# Phase 8 production readiness: data rights and operations
+class DataExportRequest(models.Model):
+    STATUS_REQUESTED = "requested"
+    STATUS_PROCESSING = "processing"
+    STATUS_READY = "ready"
+    STATUS_FAILED = "failed"
+    STATUS_EXPIRED = "expired"
+    STATUSES = [(STATUS_REQUESTED, "Requested"), (STATUS_PROCESSING, "Processing"), (STATUS_READY, "Ready"), (STATUS_FAILED, "Failed"), (STATUS_EXPIRED, "Expired")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="data_export_requests")
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_REQUESTED)
+    export_scope = models.JSONField(default=list, blank=True)
+    file = models.FileField(upload_to="data-exports/", null=True, blank=True)
+    download_token_hash = models.CharField(max_length=128, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    failure_reason = models.CharField(max_length=280, blank=True)
+    recent_auth_confirmed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        indexes = [models.Index(fields=["user", "status", "created_at"]), models.Index(fields=["expires_at"])]
+
+
+class AccountDeletionRequest(models.Model):
+    STATUS_REQUESTED = "requested"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_PROCESSING = "processing"
+    STATUS_COMPLETED = "completed"
+    STATUSES = [(STATUS_REQUESTED, "Requested"), (STATUS_CANCELLED, "Cancelled"), (STATUS_PROCESSING, "Processing"), (STATUS_COMPLETED, "Completed")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="account_deletion_requests")
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_REQUESTED)
+    reason = models.CharField(max_length=280, blank=True)
+    grace_period_ends_at = models.DateTimeField()
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    retention_notes = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        indexes = [models.Index(fields=["user", "status", "created_at"]), models.Index(fields=["grace_period_ends_at"])]
+
+
+class OperationalEvent(models.Model):
+    LEVEL_INFO = "info"
+    LEVEL_WARNING = "warning"
+    LEVEL_ERROR = "error"
+    LEVELS = [(LEVEL_INFO, "Info"), (LEVEL_WARNING, "Warning"), (LEVEL_ERROR, "Error")]
+    event_type = models.CharField(max_length=80)
+    level = models.CharField(max_length=20, choices=LEVELS, default=LEVEL_INFO)
+    correlation_id = models.CharField(max_length=80, blank=True)
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="operational_events")
+    safe_metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        indexes = [models.Index(fields=["event_type", "created_at"]), models.Index(fields=["level", "created_at"]), models.Index(fields=["correlation_id"])]

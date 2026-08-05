@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: manyumbu-api
+    env: docker
+    plan: starter
+    healthCheckPath: /health/ready/
+    envVars:
+      - key: MANYUMBU_ENV
+        value: production
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: manyumbu-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: manyumbu-redis
+          property: connectionString
+  - type: worker
+    name: manyumbu-worker
+    env: docker
+    dockerCommand: sh scripts/start_worker.sh
+  - type: worker
+    name: manyumbu-beat
+    env: docker
+    dockerCommand: sh scripts/start_beat.sh
+  - type: redis
+    name: manyumbu-redis
+    plan: starter
+
+databases:
+  - name: manyumbu-db
+    plan: starter

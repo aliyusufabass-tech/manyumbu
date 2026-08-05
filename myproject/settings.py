@@ -121,3 +121,43 @@ MANYUMBU_TURN_USERNAME = os.getenv("MANYUMBU_TURN_USERNAME", "")
 MANYUMBU_TURN_PASSWORD = os.getenv("MANYUMBU_TURN_PASSWORD", "")
 MANYUMBU_CALL_PROVIDER = os.getenv("MANYUMBU_CALL_PROVIDER", "none")
 MANYUMBU_CALL_TIMEOUT_SECONDS = int(os.getenv("MANYUMBU_CALL_TIMEOUT_SECONDS", "45"))
+
+# Phase 8 production-readiness configuration
+MANYUMBU_ENV = os.getenv("MANYUMBU_ENV", "development")
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()]
+MANYUMBU_PUBLIC_APP_URL = os.getenv("MANYUMBU_PUBLIC_APP_URL", "")
+MANYUMBU_ADMIN_URL = os.getenv("MANYUMBU_ADMIN_URL", "")
+MANYUMBU_API_URL = os.getenv("MANYUMBU_API_URL", "")
+MANYUMBU_MEDIA_PROVIDER = os.getenv("MANYUMBU_MEDIA_PROVIDER", "local")
+MANYUMBU_STORAGE_BUCKET = os.getenv("MANYUMBU_STORAGE_BUCKET", "")
+MANYUMBU_PUSH_PROVIDER = os.getenv("MANYUMBU_PUSH_PROVIDER", "expo")
+MANYUMBU_PUSH_ENABLED = os.getenv("MANYUMBU_PUSH_ENABLED", "0") == "1"
+MANYUMBU_DELETION_GRACE_DAYS = int(os.getenv("MANYUMBU_DELETION_GRACE_DAYS", "30"))
+MANYUMBU_RATE_LIMITS = {
+    "auth": os.getenv("MANYUMBU_RATE_AUTH", "10/min"),
+    "search": os.getenv("MANYUMBU_RATE_SEARCH", "60/min"),
+    "messages": os.getenv("MANYUMBU_RATE_MESSAGES", "60/min"),
+    "calls": os.getenv("MANYUMBU_RATE_CALLS", "20/hour"),
+    "reports": os.getenv("MANYUMBU_RATE_REPORTS", "20/day"),
+}
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL or "memory://")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL or "cache+memory://")
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "0") == "1"
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
+CSRF_COOKIE_SECURE = os.getenv("CSRF_COOKIE_SECURE", "0") == "1"
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "0"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv("SECURE_HSTS_INCLUDE_SUBDOMAINS", "0") == "1"
+SECURE_HSTS_PRELOAD = os.getenv("SECURE_HSTS_PRELOAD", "0") == "1"
+SECURE_REFERRER_POLICY = os.getenv("SECURE_REFERRER_POLICY", "same-origin")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"json": {"format": "{\"level\": \"%(levelname)s\", \"logger\": \"%(name)s\", \"message\": \"%(message)s\"}", "style": "%"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "json"}},
+    "root": {"handlers": ["console"], "level": os.getenv("DJANGO_LOG_LEVEL", "INFO")},
+}
+
+from .env_validation import validate_production_environment
+validate_production_environment()

@@ -111,3 +111,11 @@ for model in [Call, CallParticipant, CallDeviceSession, CallSignalEvent, CallHis
         admin.site.register(model)
     except admin.sites.AlreadyRegistered:
         pass
+
+from .models import AccountDeletionRequest, DataExportRequest, OperationalEvent
+
+for model in [DataExportRequest, AccountDeletionRequest, OperationalEvent]:
+    try:
+        admin.site.register(model)
+    except admin.sites.AlreadyRegistered:
+        pass

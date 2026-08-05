@@ -110,3 +110,19 @@ Phase 6 adds group chats, group roles, invitations, join requests, group message
 ## Phase 7 Calls, Advanced Moderation, and Professional Accounts
 
 Phase 7 adds voice/video call records, authenticated call signaling WebSockets, call history, call reporting, call privacy, feature restrictions, appeals, creator and business accounts, verification requests, professional insights, mobile call/professional screens, and admin review tools. See docs/phase-7-completion.md for endpoints, migration details, WebRTC configuration, test results, and known limitations.
+
+## Phase 8 Production Readiness
+
+Production readiness artifacts are documented in:
+
+- `docs/phase-8-completion.md`
+- `docs/deployment.md`
+- `docs/security.md`
+- `docs/operations.md`
+- `docs/backups.md`
+- `docs/mobile-build.md`
+- `docs/api.md`
+- `docs/websockets.md`
+- `docs/manual-testing.md`
+
+Operational legal/policy drafts are in `docs/privacy-policy.md`, `docs/terms.md`, `docs/community-guidelines.md`, `docs/child-safety.md`, `docs/content-reporting-policy.md`, `docs/account-deletion-policy.md`, `docs/data-export-policy.md`, `docs/data-retention-policy.md`, `docs/moderation-policy.md`, `docs/appeal-policy.md`, and `docs/copyright-complaints.md`. These drafts require legal review before launch.
