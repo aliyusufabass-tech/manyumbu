@@ -201,6 +201,15 @@ class UserPrivacySettings(models.Model):
     dob_visibility = models.CharField(max_length=20, choices=DOB_VISIBILITY, default=DOB_HIDDEN)
     profile_details_public = models.BooleanField(default=True)
     online_status_visible = models.BooleanField(default=True)
+    who_can_message_me = models.CharField(max_length=30, default="everyone")
+    who_can_add_to_conversations = models.CharField(max_length=30, default="people_i_follow")
+    show_online_status = models.CharField(max_length=30, default="everyone")
+    show_last_seen = models.CharField(max_length=30, default="people_i_follow")
+    send_read_receipts = models.BooleanField(default=True)
+    show_typing_indicator = models.BooleanField(default=True)
+    show_recording_indicator = models.BooleanField(default=True)
+    allow_message_requests = models.BooleanField(default=True)
+    allow_forwarded_messages_from_unknown_users = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -823,3 +832,335 @@ class ReelReport(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         constraints = [models.UniqueConstraint(fields=["reel", "reporter", "reason"], name="unique_reel_report_reason")]
+
+
+class Conversation(models.Model):
+    TYPE_PRIVATE = "private"
+    TYPES = [(TYPE_PRIVATE, "Private")]
+    STATUS_ACTIVE = "active"
+    STATUS_DELETED = "deleted"
+    STATUSES = [(STATUS_ACTIVE, "Active"), (STATUS_DELETED, "Deleted")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conversation_type = models.CharField(max_length=20, choices=TYPES, default=TYPE_PRIVATE)
+    private_pair_key = models.CharField(max_length=80, unique=True)
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_ACTIVE)
+    last_message = models.ForeignKey("Message", on_delete=models.SET_NULL, null=True, blank=True, related_name="last_for_conversations")
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    soft_deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["conversation_type", "last_message_at"]), models.Index(fields=["status", "updated_at"])]
+
+
+class ConversationParticipant(models.Model):
+    REQUEST_NONE = "none"
+    REQUEST_PENDING = "pending"
+    REQUEST_ACCEPTED = "accepted"
+    REQUEST_REJECTED = "rejected"
+    REQUEST_DELETED = "deleted"
+    REQUEST_SPAM = "spam"
+    REQUEST_STATES = [(REQUEST_NONE, "None"), (REQUEST_PENDING, "Pending"), (REQUEST_ACCEPTED, "Accepted"), (REQUEST_REJECTED, "Rejected"), (REQUEST_DELETED, "Deleted"), (REQUEST_SPAM, "Spam")]
+    NOTIFY_ALL = "all"
+    NOTIFY_MENTIONS = "mentions"
+    NOTIFY_NONE = "none"
+
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="participants")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="conversation_participations")
+    joined_at = models.DateTimeField(auto_now_add=True)
+    last_read_message = models.ForeignKey("Message", on_delete=models.SET_NULL, null=True, blank=True, related_name="last_read_by")
+    last_read_at = models.DateTimeField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    muted_until = models.DateTimeField(null=True, blank=True)
+    marked_unread = models.BooleanField(default=False)
+    cleared_before = models.DateTimeField(null=True, blank=True)
+    request_state = models.CharField(max_length=20, choices=REQUEST_STATES, default=REQUEST_NONE)
+    notification_preference = models.CharField(max_length=20, default=NOTIFY_ALL)
+    keep_archived = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["conversation", "user"], name="unique_conversation_participant")]
+        indexes = [models.Index(fields=["user", "archived_at", "updated_at"]), models.Index(fields=["conversation", "request_state"])]
+
+
+class Message(models.Model):
+    TYPE_TEXT = "text"
+    TYPE_IMAGE = "image"
+    TYPE_VIDEO = "video"
+    TYPE_DOCUMENT = "document"
+    TYPE_AUDIO = "audio"
+    TYPE_VOICE_NOTE = "voice_note"
+    TYPE_LOCATION = "location"
+    TYPE_CONTACT = "contact"
+    TYPE_POST_SHARE = "post_share"
+    TYPE_REEL_SHARE = "reel_share"
+    TYPE_STORY_REPLY = "story_reply"
+    TYPE_SYSTEM = "system"
+    TYPES = [(TYPE_TEXT, "Text"), (TYPE_IMAGE, "Image"), (TYPE_VIDEO, "Video"), (TYPE_DOCUMENT, "Document"), (TYPE_AUDIO, "Audio"), (TYPE_VOICE_NOTE, "Voice note"), (TYPE_LOCATION, "Location"), (TYPE_CONTACT, "Contact"), (TYPE_POST_SHARE, "Post share"), (TYPE_REEL_SHARE, "Reel share"), (TYPE_STORY_REPLY, "Story reply"), (TYPE_SYSTEM, "System")]
+    STATUS_SENT = "sent"
+    STATUS_DELIVERED = "delivered"
+    STATUS_READ = "read"
+    STATUS_FAILED = "failed"
+    STATUS_DELETED = "deleted"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_messages")
+    message_type = models.CharField(max_length=30, choices=TYPES, default=TYPE_TEXT)
+    text = models.TextField(blank=True, max_length=5000)
+    reply_to = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True, related_name="replies")
+    forwarded_from = models.JSONField(default=dict, blank=True)
+    shared_content = models.JSONField(default=dict, blank=True)
+    location_payload = models.JSONField(default=dict, blank=True)
+    contact_payload = models.JSONField(default=dict, blank=True)
+    client_message_id = models.CharField(max_length=80, blank=True)
+    status = models.CharField(max_length=20, default=STATUS_SENT)
+    is_forwarded = models.BooleanField(default=False)
+    is_edited = models.BooleanField(default=False)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    deleted_for_everyone_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["sender", "client_message_id"], condition=~models.Q(client_message_id=""), name="unique_message_client_id_per_sender")]
+        indexes = [models.Index(fields=["conversation", "created_at"]), models.Index(fields=["sender", "created_at"]), models.Index(fields=["message_type", "created_at"])]
+
+
+class MessageAttachment(models.Model):
+    KIND_IMAGE = "image"
+    KIND_VIDEO = "video"
+    KIND_DOCUMENT = "document"
+    KIND_AUDIO = "audio"
+    KIND_VOICE_NOTE = "voice_note"
+    KINDS = [(KIND_IMAGE, "Image"), (KIND_VIDEO, "Video"), (KIND_DOCUMENT, "Document"), (KIND_AUDIO, "Audio"), (KIND_VOICE_NOTE, "Voice note")]
+    PROCESSING_PENDING = "pending"
+    PROCESSING_READY = "ready"
+    PROCESSING_FAILED = "failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="attachments")
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="message_attachments")
+    file = models.FileField(upload_to="messages/", null=True, blank=True)
+    kind = models.CharField(max_length=30, choices=KINDS)
+    file_name = models.CharField(max_length=180)
+    mime_type = models.CharField(max_length=120)
+    file_size = models.PositiveIntegerField(default=0)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    duration = models.FloatField(null=True, blank=True)
+    thumbnail = models.FileField(upload_to="message-thumbnails/", null=True, blank=True)
+    waveform = models.JSONField(default=list, blank=True)
+    processing_status = models.CharField(max_length=20, default=PROCESSING_READY)
+    malware_scan_status = models.CharField(max_length=20, default="pending")
+    upload_provider_id = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["message", "kind"]), models.Index(fields=["owner", "created_at"])]
+
+
+class MessageDeletion(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="deleted_for")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="message_deletions")
+    deleted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "user"], name="unique_message_delete_for_user")]
+
+
+class MessageReaction(models.Model):
+    REACTIONS = [("like", "Like"), ("love", "Love"), ("laugh", "Laugh"), ("surprise", "Surprise"), ("sad", "Sad"), ("celebration", "Celebration")]
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="reactions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="message_reactions")
+    reaction = models.CharField(max_length=20, choices=REACTIONS)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "user"], name="unique_message_reaction")]
+
+
+class MessageReadReceipt(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="read_receipts")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="message_read_receipts")
+    read_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "user"], name="unique_message_read_receipt")]
+        indexes = [models.Index(fields=["user", "read_at"])]
+
+
+class MessageDeliveryReceipt(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="delivery_receipts")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="message_delivery_receipts")
+    delivered_at = models.DateTimeField(auto_now_add=True)
+    device_id = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "user", "device_id"], name="unique_message_delivery_receipt")]
+
+
+class MessageStar(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="stars")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="message_stars")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "user"], name="unique_message_star")]
+        indexes = [models.Index(fields=["user", "created_at"])]
+
+
+class MessagePin(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="pins")
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="pins")
+    pinned_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="message_pins")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "conversation"], name="unique_conversation_message_pin")]
+        indexes = [models.Index(fields=["conversation", "created_at"])]
+
+
+class ConversationMute(models.Model):
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="mute_records")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="conversation_mutes")
+    muted_until = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["conversation", "user"], name="unique_conversation_mute")]
+
+
+class ConversationArchive(models.Model):
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="archive_records")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="conversation_archives")
+    archived_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["conversation", "user"], name="unique_conversation_archive")]
+
+
+class ConversationClearState(models.Model):
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="clear_states")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="conversation_clear_states")
+    cleared_before = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["conversation", "user"], name="unique_conversation_clear_state")]
+
+
+class MessageRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_REJECTED = "rejected"
+    STATUS_DELETED = "deleted"
+    STATUS_SPAM = "spam"
+    STATUSES = [(STATUS_PENDING, "Pending"), (STATUS_ACCEPTED, "Accepted"), (STATUS_REJECTED, "Rejected"), (STATUS_DELETED, "Deleted"), (STATUS_SPAM, "Spam")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conversation = models.OneToOneField(Conversation, on_delete=models.CASCADE, related_name="message_request")
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_message_requests")
+    receiver = models.ForeignKey(User, on_delete=models.CASCADE, related_name="received_message_requests")
+    preview_text = models.CharField(max_length=280, blank=True)
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_PENDING)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    spam_score = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["sender", "receiver", "status"], name="unique_message_request_state")]
+        indexes = [models.Index(fields=["receiver", "status", "created_at"]), models.Index(fields=["sender", "receiver"])]
+
+
+class MessageReport(models.Model):
+    REASONS = PostReport.REASONS
+    STATUS_PENDING = "pending"
+    STATUS_UNDER_REVIEW = "under_review"
+    STATUS_RESOLVED = "resolved"
+    STATUS_REJECTED = "rejected"
+    STATUSES = [(STATUS_PENDING, "Pending"), (STATUS_UNDER_REVIEW, "Under review"), (STATUS_RESOLVED, "Resolved"), (STATUS_REJECTED, "Rejected")]
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="reports")
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name="message_reports")
+    reason = models.CharField(max_length=40, choices=REASONS)
+    details = models.TextField(blank=True, max_length=1000)
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_PENDING)
+    context_snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "reporter", "reason"], name="unique_message_report_reason")]
+        indexes = [models.Index(fields=["status", "created_at"])]
+
+
+class ConversationReport(models.Model):
+    REASONS = PostReport.REASONS
+    STATUS_PENDING = "pending"
+    STATUS_UNDER_REVIEW = "under_review"
+    STATUS_RESOLVED = "resolved"
+    STATUS_REJECTED = "rejected"
+    STATUSES = MessageReport.STATUSES
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="reports")
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name="conversation_reports")
+    reason = models.CharField(max_length=40, choices=REASONS)
+    details = models.TextField(blank=True, max_length=1000)
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_PENDING)
+    context_snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["conversation", "reporter", "reason"], name="unique_conversation_report_reason")]
+        indexes = [models.Index(fields=["status", "created_at"])]
+
+
+class UserPresence(models.Model):
+    STATE_OFFLINE = "offline"
+    STATE_ONLINE = "online"
+    STATE_RECENTLY_ACTIVE = "recently_active"
+    STATES = [(STATE_OFFLINE, "Offline"), (STATE_ONLINE, "Online"), (STATE_RECENTLY_ACTIVE, "Recently active")]
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="presence")
+    state = models.CharField(max_length=30, choices=STATES, default=STATE_OFFLINE)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    last_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class UserDevice(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="devices")
+    device_id = models.CharField(max_length=120)
+    device_name = models.CharField(max_length=120, blank=True)
+    platform = models.CharField(max_length=40, blank=True)
+    push_token = models.CharField(max_length=255, blank=True)
+    notification_preferences = models.JSONField(default=dict, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "device_id"], name="unique_user_device")]
+        indexes = [models.Index(fields=["user", "revoked_at"])]
+
+
+class WebSocketSession(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="websocket_sessions")
+    channel_name = models.CharField(max_length=255)
+    device_id = models.CharField(max_length=120, blank=True)
+    connected_at = models.DateTimeField(auto_now_add=True)
+    last_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    disconnected_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["user", "disconnected_at"]), models.Index(fields=["channel_name"])]
+
+

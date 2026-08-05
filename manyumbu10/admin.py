@@ -87,3 +87,11 @@ admin.site.register(ReelAudienceUser)
 admin.site.register(ReelComment)
 admin.site.register(ReelReport)
 
+
+from .models import Conversation, ConversationArchive, ConversationClearState, ConversationMute, ConversationParticipant, ConversationReport, Message, MessageAttachment, MessageDeletion, MessageDeliveryReceipt, MessagePin, MessageReaction, MessageReadReceipt, MessageReport, MessageRequest, MessageStar, UserDevice, UserPresence, WebSocketSession
+
+for model in [Conversation, ConversationParticipant, Message, MessageAttachment, MessageDeletion, MessageReaction, MessageReadReceipt, MessageDeliveryReceipt, MessageStar, MessagePin, ConversationMute, ConversationArchive, ConversationClearState, MessageRequest, MessageReport, ConversationReport, UserPresence, UserDevice, WebSocketSession]:
+    try:
+        admin.site.register(model)
+    except admin.sites.AlreadyRegistered:
+        pass

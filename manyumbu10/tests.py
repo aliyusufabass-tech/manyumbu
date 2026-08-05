@@ -657,3 +657,198 @@ class PhaseFourStoryReelTests(TestCase):
         self.assertEqual(self.post_json(f"/api/v1/admin/stories/{story.id}/remove/", {"reason": "policy"}, token=self.admin_token).status_code, 200)
         story.refresh_from_db()
         self.assertEqual(story.status, Story.STATUS_REMOVED)
+
+from asgiref.sync import async_to_sync
+from channels.testing import WebsocketCommunicator
+from django.test import TransactionTestCase
+
+from myproject.asgi import application
+from .models import Conversation, ConversationParticipant, Message, MessageAttachment, MessageDeletion, MessagePin, MessageReaction, MessageReadReceipt, MessageReport, MessageRequest, MessageStar, ConversationReport, UserDevice, UserPresence
+
+
+class PhaseFiveMessagingTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        User = get_user_model()
+        self.alice = User.objects.create_user("+255744000001", "ma@example.com", "msgalice", "Msg Alice", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.bob = User.objects.create_user("+255744000002", "mb@example.com", "msgbob", "Msg Bob", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.caro = User.objects.create_user("+255744000003", "mc@example.com", "msgcaro", "Msg Caro", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.admin = User.objects.create_user("+255744000004", "md@example.com", "msgadmin", "Msg Admin", "StrongerPass123!", date_of_birth="1990-01-01", is_active=True, is_email_verified=True, is_staff=True)
+        for user in [self.alice, self.bob, self.caro, self.admin]:
+            ensure_profile_records(user)
+        self.alice_token = issue_tokens(self.alice)["access"]
+        self.bob_token = issue_tokens(self.bob)["access"]
+        self.caro_token = issue_tokens(self.caro)["access"]
+        self.admin_token = issue_tokens(self.admin)["access"]
+
+    def auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def post_json(self, url, payload=None, token=None):
+        return self.client.post(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+
+    def patch_json(self, url, payload=None, token=None):
+        return self.client.patch(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+
+    def conversation(self):
+        response = self.post_json("/api/v1/conversations/", {"username": "msgbob"})
+        self.assertIn(response.status_code, [200, 201], response.content)
+        return Conversation.objects.get(id=response.json()["data"]["conversation"]["id"])
+
+    def send_text(self, conversation, text="Hello", token=None, client_id="c1"):
+        response = self.post_json(f"/api/v1/conversations/{conversation.id}/messages/", {"message_type": "text", "text": text, "client_message_id": client_id}, token=token)
+        self.assertIn(response.status_code, [200, 201], response.content)
+        return Message.objects.get(id=response.json()["data"]["message"]["id"])
+
+    def test_private_conversation_creation_reuses_pair_and_prevents_blocked(self):
+        first = self.post_json("/api/v1/conversations/", {"username": "msgbob"})
+        second = self.post_json("/api/v1/conversations/", {"username": "msgbob"})
+        self.assertEqual(first.json()["data"]["conversation"]["id"], second.json()["data"]["conversation"]["id"])
+        self.assertEqual(Conversation.objects.count(), 1)
+        BlockedUser.objects.create(blocker=self.bob, blocked=self.alice)
+        response = self.post_json("/api/v1/conversations/", {"username": "msgbob"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_messaging_privacy_and_request_acceptance(self):
+        self.bob.privacy_settings.who_can_message_me = "mutual_followers"
+        self.bob.privacy_settings.allow_message_requests = True
+        self.bob.privacy_settings.save()
+        response = self.post_json("/api/v1/conversations/", {"username": "msgbob", "initial_text": "Request hello"})
+        self.assertEqual(response.status_code, 201, response.content)
+        req = MessageRequest.objects.get(receiver=self.bob)
+        self.assertEqual(req.status, MessageRequest.STATUS_PENDING)
+        requests = self.client.get("/api/v1/message-requests/", **self.auth(self.bob_token))
+        self.assertEqual(requests.json()["data"]["count"], 1)
+        denied = self.post_json(f"/api/v1/conversations/{req.conversation_id}/messages/", {"text": "not yet"}, token=self.bob_token)
+        self.assertEqual(denied.status_code, 403)
+        accepted = self.post_json(f"/api/v1/message-requests/{req.id}/accept/", token=self.bob_token)
+        self.assertEqual(accepted.status_code, 200)
+        ok = self.post_json(f"/api/v1/conversations/{req.conversation_id}/messages/", {"text": "accepted"}, token=self.bob_token)
+        self.assertEqual(ok.status_code, 201)
+
+    def test_text_dedup_reply_edit_delete_react_star_pin_and_receipts(self):
+        convo = self.conversation()
+        msg = self.send_text(convo, "Line one\nLine two https://example.com", client_id="same")
+        dup = self.post_json(f"/api/v1/conversations/{convo.id}/messages/", {"message_type": "text", "text": "Line one", "client_message_id": "same"})
+        self.assertFalse(dup.json()["data"]["deduplicated"] is False)
+        empty = self.post_json(f"/api/v1/conversations/{convo.id}/messages/", {"text": ""})
+        self.assertEqual(empty.status_code, 400)
+        reply = self.post_json(f"/api/v1/conversations/{convo.id}/messages/", {"text": "reply", "reply_to_id": str(msg.id), "client_message_id": "reply1"}, token=self.bob_token)
+        self.assertEqual(reply.status_code, 201)
+        self.assertEqual(self.patch_json(f"/api/v1/messages/{msg.id}/", {"text": "Edited"}, token=self.bob_token).status_code, 403)
+        self.assertEqual(self.patch_json(f"/api/v1/messages/{msg.id}/", {"text": "Edited"}).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/messages/{msg.id}/react/", {"reaction": "love"}, token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/messages/{msg.id}/star/", token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/messages/{msg.id}/pin/", token=self.bob_token).status_code, 200)
+        self.assertTrue(MessageReaction.objects.filter(message=msg, user=self.bob, reaction="love").exists())
+        self.assertTrue(MessageStar.objects.filter(message=msg, user=self.bob).exists())
+        self.assertTrue(MessagePin.objects.filter(message=msg, conversation=convo).exists())
+        self.assertEqual(self.post_json(f"/api/v1/messages/{msg.id}/delivered/", {"device_id": "phone"}, token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/messages/{msg.id}/read/", token=self.bob_token).status_code, 200)
+        self.assertTrue(MessageReadReceipt.objects.filter(message=msg, user=self.bob).exists())
+        self.bob.privacy_settings.send_read_receipts = False
+        self.bob.privacy_settings.save(update_fields=["send_read_receipts", "updated_at"])
+        detail = self.client.get(f"/api/v1/messages/{msg.id}/", **self.auth(self.alice_token))
+        self.assertEqual(detail.json()["data"]["message"]["read_by"], [])
+        self.assertEqual(self.client.delete(f"/api/v1/messages/{msg.id}/for-me/", **self.auth(self.bob_token)).status_code, 200)
+        self.assertTrue(MessageDeletion.objects.filter(message=msg, user=self.bob).exists())
+        self.assertEqual(self.client.delete(f"/api/v1/messages/{msg.id}/for-everyone/", **self.auth(self.alice_token)).status_code, 200)
+
+    def test_attachment_validation_shared_media_location_contact_and_devices(self):
+        convo = self.conversation()
+        image = SimpleUploadedFile("photo.jpg", b"img", content_type="image/jpeg")
+        response = self.client.post(f"/api/v1/conversations/{convo.id}/messages/", {"message_type": "image", "attachment_kind": "image", "attachments": [image], "text": "caption"}, **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 201, response.content)
+        bad = SimpleUploadedFile("run.exe", b"bad", content_type="application/octet-stream")
+        response = self.client.post(f"/api/v1/conversations/{convo.id}/messages/", {"message_type": "document", "attachment_kind": "document", "attachments": [bad]}, **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 400)
+        voice = SimpleUploadedFile("voice.webm", b"audio", content_type="audio/webm")
+        response = self.client.post(f"/api/v1/conversations/{convo.id}/messages/", {"message_type": "voice_note", "attachment_kind": "voice_note", "duration": "4", "attachments": [voice]}, **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 201)
+        response = self.post_json(f"/api/v1/conversations/{convo.id}/messages/", {"message_type": "location", "location": {"latitude": -6.8, "longitude": 39.2, "label": "Dar"}, "client_message_id": "loc1"})
+        self.assertEqual(response.status_code, 201)
+        response = self.post_json(f"/api/v1/conversations/{convo.id}/messages/", {"message_type": "contact", "contact": {"name": "Bob", "phone": "+255"}, "client_message_id": "contact1"})
+        self.assertEqual(response.status_code, 201)
+        media = self.client.get(f"/api/v1/conversations/{convo.id}/media/", **self.auth(self.bob_token))
+        self.assertGreaterEqual(media.json()["data"]["count"], 2)
+        device = self.post_json("/api/v1/devices/", {"device_id": "phone1", "platform": "ios", "push_token": "ExponentPushToken[test]"})
+        self.assertEqual(device.status_code, 200)
+        self.assertTrue(UserDevice.objects.filter(user=self.alice, device_id="phone1").exists())
+
+    def test_conversation_state_search_sync_reports_and_admin_limits(self):
+        convo = self.conversation()
+        msg = self.send_text(convo, "Find this needle", client_id="needle")
+        self.assertEqual(self.post_json(f"/api/v1/conversations/{convo.id}/archive/", token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/conversations/{convo.id}/mute/", {"duration": "1h"}, token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/conversations/{convo.id}/unread/", token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/conversations/{convo.id}/clear/", token=self.bob_token).status_code, 200)
+        search = self.client.get(f"/api/v1/conversations/{convo.id}/search/?q=needle", **self.auth(self.alice_token))
+        self.assertEqual(search.json()["data"]["count"], 1)
+        self.assertEqual(self.client.get("/api/v1/conversations/sync/", **self.auth(self.alice_token)).status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/messages/sync/", **self.auth(self.alice_token)).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/messages/{msg.id}/report/", {"reason": "spam"}, token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/conversations/{convo.id}/report/", {"reason": "harassment"}, token=self.bob_token).status_code, 200)
+        self.assertTrue(MessageReport.objects.filter(message=msg, reporter=self.bob).exists())
+        self.assertTrue(ConversationReport.objects.filter(conversation=convo, reporter=self.bob).exists())
+        self.assertEqual(self.client.get("/api/v1/admin/message-reports/", **self.auth(self.bob_token)).status_code, 403)
+        reports = self.client.get("/api/v1/admin/message-reports/?kind=messages", **self.auth(self.admin_token))
+        self.assertEqual(reports.status_code, 200)
+        report_id = reports.json()["data"]["results"][0]["id"]
+        self.assertEqual(self.post_json(f"/api/v1/admin/message-reports/messages/{report_id}/review/", {"reason": "triage"}, token=self.admin_token).status_code, 200)
+
+    def test_forward_post_reel_story_share_payloads(self):
+        convo = self.conversation()
+        post = Post.objects.create(author=self.alice, caption="share me", published_at=timezone.now())
+        reel = Reel.objects.create(author=self.alice, caption="reel", video_url="https://cdn.example/reel.mp4", published_at=timezone.now(), processing_status=Reel.PROCESSING_READY)
+        story = Story.objects.create(author=self.alice, caption="story", published_at=timezone.now(), expires_at=timezone.now() + timedelta(hours=1))
+        for kind, obj in [("post_share", post), ("reel_share", reel), ("story_reply", story)]:
+            response = self.post_json(f"/api/v1/conversations/{convo.id}/messages/", {"message_type": kind, "text": "see this", "shared_content": {"content_type": kind, "id": str(obj.id)}, "client_message_id": kind})
+            self.assertEqual(response.status_code, 201, response.content)
+        first = Message.objects.filter(conversation=convo).first()
+        forwarded = self.post_json(f"/api/v1/messages/{first.id}/forward/", {"username": "msgcaro", "note": "forwarded"})
+        self.assertIn(forwarded.status_code, [201, 403], forwarded.content)
+
+
+class PhaseFiveWebSocketTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        User = get_user_model()
+        self.alice = User.objects.create_user("+255755000001", "wa@example.com", "wsalice", "Ws Alice", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.bob = User.objects.create_user("+255755000002", "wb@example.com", "wsbob", "Ws Bob", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        for user in [self.alice, self.bob]:
+            ensure_profile_records(user)
+        self.alice_token = issue_tokens(self.alice)["access"]
+        self.bob_token = issue_tokens(self.bob)["access"]
+        self.conversation, _, _ = __import__("manyumbu10.messaging_services", fromlist=["get_or_create_private_conversation"]).get_or_create_private_conversation(self.alice, self.bob)
+
+    async def chat_flow(self):
+        communicator = WebsocketCommunicator(application, f"/ws/chat/{self.conversation.id}/?token={self.alice_token}")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        ready = await communicator.receive_json_from()
+        self.assertEqual(ready["event"], "connection.ready")
+        await communicator.send_json_to({"event": "message.send", "request_id": "ws1", "data": {"text": "hello ws", "client_message_id": "ws1"}})
+        created = await communicator.receive_json_from()
+        self.assertEqual(created["event"], "message.created")
+        await communicator.disconnect()
+
+    async def unauthorized_flow(self):
+        communicator = WebsocketCommunicator(application, f"/ws/chat/{self.conversation.id}/?token=bad")
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+
+    async def non_member_flow(self):
+        User = get_user_model()
+        stranger = await __import__("channels.db", fromlist=["database_sync_to_async"]).database_sync_to_async(User.objects.create_user)("+255755000003", "wc@example.com", "wsstranger", "Ws Stranger", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        token = await __import__("channels.db", fromlist=["database_sync_to_async"]).database_sync_to_async(lambda: issue_tokens(stranger)["access"])()
+        communicator = WebsocketCommunicator(application, f"/ws/chat/{self.conversation.id}/?token={token}")
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+
+    def test_websocket_auth_membership_and_message_send(self):
+        async_to_sync(self.chat_flow)()
+        self.assertTrue(Message.objects.filter(conversation=self.conversation, text="hello ws").exists())
+        self.assertTrue(UserPresence.objects.filter(user=self.alice).exists())
+        async_to_sync(self.unauthorized_flow)()
+        async_to_sync(self.non_member_flow)()

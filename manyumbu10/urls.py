@@ -1,5 +1,22 @@
 from django.urls import path
 
+from .messaging_views import (
+    AdminMessageReportView,
+    ConversationDetailView,
+    ConversationListView,
+    ConversationMessagesView,
+    ConversationStateView,
+    DeviceView,
+    MessageActionView,
+    MessageDeleteForEveryoneView,
+    MessageDeleteForMeView,
+    MessageDetailView,
+    MessageRequestActionView,
+    MessageRequestListView,
+    MessageSearchView,
+    MessagingSyncView,
+    SharedMediaView,
+)
 from .phase4_views import (
     AdminStoryReelView,
     HighlightListView,
@@ -91,8 +108,24 @@ urlpatterns = [
     path("relationships/muted/<str:username>/", MutedView.as_view(), name="muted-action"),
     path("relationships/close-friends/", CloseFriendsView.as_view(), name="close-friends-list"),
     path("relationships/close-friends/<str:username>/", CloseFriendsView.as_view(), name="close-friends-action"),
-    path("stories/", StoryCollectionView.as_view(), name="story-create"),
-    path("stories/tray/", StoryTrayView.as_view(), name="story-tray"),
+    path("conversations/", ConversationListView.as_view(), name="conversation-list"),
+    path("conversations/sync/", MessagingSyncView.as_view(), {"kind": "conversations"}, name="conversation-sync"),
+    path("conversations/<uuid:conversation_id>/", ConversationDetailView.as_view(), name="conversation-detail"),
+    path("conversations/<uuid:conversation_id>/messages/", ConversationMessagesView.as_view(), name="conversation-messages"),
+    path("conversations/<uuid:conversation_id>/search/", MessageSearchView.as_view(), name="conversation-message-search"),
+    path("conversations/<uuid:conversation_id>/media/", SharedMediaView.as_view(), name="conversation-media"),
+    path("conversations/<uuid:conversation_id>/<str:action>/", ConversationStateView.as_view(), name="conversation-state"),
+    path("messages/sync/", MessagingSyncView.as_view(), {"kind": "messages"}, name="message-sync"),
+    path("messages/<uuid:message_id>/", MessageDetailView.as_view(), name="message-detail"),
+    path("messages/<uuid:message_id>/for-me/", MessageDeleteForMeView.as_view(), name="message-delete-for-me"),
+    path("messages/<uuid:message_id>/for-everyone/", MessageDeleteForEveryoneView.as_view(), name="message-delete-for-everyone"),
+    path("messages/<uuid:message_id>/<str:action>/", MessageActionView.as_view(), name="message-action"),
+    path("message-requests/", MessageRequestListView.as_view(), name="message-request-list"),
+    path("message-requests/<uuid:request_id>/<str:action>/", MessageRequestActionView.as_view(), name="message-request-action"),
+    path("devices/", DeviceView.as_view(), name="user-devices"),
+    path("admin/message-reports/", AdminMessageReportView.as_view(), name="admin-message-reports"),
+    path("admin/message-reports/<str:report_kind>/<int:report_id>/<str:action>/", AdminMessageReportView.as_view(), name="admin-message-report-action"),
+    path("stories/", StoryCollectionView.as_view(), name="story-create"),    path("stories/tray/", StoryTrayView.as_view(), name="story-tray"),
     path("stories/<uuid:story_id>/", StoryDetailView.as_view(), name="story-detail"),
     path("stories/<uuid:story_id>/view/", StoryViewView.as_view(), name="story-view"),
     path("stories/<uuid:story_id>/viewers/", StoryViewersView.as_view(), name="story-viewers"),
@@ -139,6 +172,10 @@ urlpatterns = [
     path("hashtags/<str:hashtag>/posts/", HashtagPostsView.as_view(), name="hashtag-posts"),
     path("relationships/<str:list_name>/", RelationshipListView.as_view(), name="relationship-list"),
 ]
+
+
+
+
 
 
 

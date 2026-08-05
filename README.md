@@ -97,3 +97,8 @@ Phase 3 adds posts, media records, comments, likes, saved posts, hashtags, menti
 
 Phase 4 adds stories, story media, reactions, replies, polls, highlights, reels, reel engagement, reel comments, feed/list endpoints, mobile story/reel screens, profile reel grids, and admin story/reel moderation. See docs/phase-4-completion.md for endpoints, migration details, test results, video-processing status, and known limitations.
 
+
+## Phase 5 Private Messaging
+
+Phase 5 adds private conversations, message requests, authenticated WebSockets, attachments, voice-note metadata, presence, read/delivery receipts, offline queue helpers, synchronization endpoints, mobile chat screens, and restricted admin moderation for reported private content. See docs/phase-5-completion.md for endpoint, event, migration, test, security, and limitation details.
+

@@ -186,7 +186,7 @@ class PrivacySettingsView(AuthenticatedView):
     def patch(self, request):
         payload = body(request)
         settings = request.user_obj.privacy_settings
-        for field in ["show_in_suggestions", "phone_discoverable", "dob_visibility", "profile_details_public", "online_status_visible"]:
+        for field in ["show_in_suggestions", "phone_discoverable", "dob_visibility", "profile_details_public", "online_status_visible", "who_can_message_me", "who_can_add_to_conversations", "show_online_status", "show_last_seen", "send_read_receipts", "show_typing_indicator", "show_recording_indicator", "allow_message_requests", "allow_forwarded_messages_from_unknown_users"]:
             if field in payload:
                 setattr(settings, field, payload[field])
         settings.full_clean()
@@ -201,6 +201,15 @@ def privacy_payload(settings):
         "dob_visibility": settings.dob_visibility,
         "profile_details_public": settings.profile_details_public,
         "online_status_visible": settings.online_status_visible,
+        "who_can_message_me": settings.who_can_message_me,
+        "who_can_add_to_conversations": settings.who_can_add_to_conversations,
+        "show_online_status": settings.show_online_status,
+        "show_last_seen": settings.show_last_seen,
+        "send_read_receipts": settings.send_read_receipts,
+        "show_typing_indicator": settings.show_typing_indicator,
+        "show_recording_indicator": settings.show_recording_indicator,
+        "allow_message_requests": settings.allow_message_requests,
+        "allow_forwarded_messages_from_unknown_users": settings.allow_forwarded_messages_from_unknown_users,
     }
 
 
@@ -417,3 +426,6 @@ class ProfileMediaView(AuthenticatedView):
         else:
             return response(False, "Unknown profile media type.", status=400)
         return response(True, "Profile media removed successfully.", {"profile": profile_payload(request.user_obj, request.user_obj, include_private=True)})
+
+
+

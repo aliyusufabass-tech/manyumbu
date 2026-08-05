@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { adminLogin } from "./api/auth";
 import { fetchAdminPosts, moderatePost } from "./api/posts";
 import { fetchAdminReels, fetchAdminStories, moderateStoryReel } from "./api/phase4";
+import { fetchMessageReports, moderateMessageReport } from "./api/messaging";
 import "./styles.css";
 
 const queryClient = new QueryClient();
@@ -35,6 +36,14 @@ function StoriesReelsPanel({ token }: { token: string }) {
   const moderation = useMutation({ mutationFn: ({ kind, id, action }: { kind: "stories" | "reels"; id: string; action: "remove" | "restore" | "retry-processing" }) => moderateStoryReel(token, kind, id, action, "Admin dashboard action"), onSuccess: () => { client.invalidateQueries({ queryKey: ["admin-stories"] }); client.invalidateQueries({ queryKey: ["admin-reels"] }); } });
   return <section className="content-panel"><div className="toolbar"><h2>Stories and Reels</h2></div><h3>Stories</h3><div className="table">{(stories.data?.data.results ?? []).map((story) => <div className="row" key={story.id}><div><strong>{story.author.username}</strong><p>{story.caption || story.story_type}</p><small>{story.status} · {story.view_count} views</small></div><div className="actions"><button onClick={() => moderation.mutate({ kind: "stories", id: story.id, action: "remove" })}>Remove</button><button onClick={() => moderation.mutate({ kind: "stories", id: story.id, action: "restore" })}>Restore</button></div></div>)}</div><h3>Reels</h3><div className="table">{(reels.data?.data.results ?? []).map((reel) => <div className="row" key={reel.id}><div><strong>{reel.author.username}</strong><p>{reel.caption || "Reel"}</p><small>{reel.status} · {reel.processing_status} · {reel.view_count} views</small></div><div className="actions"><button onClick={() => moderation.mutate({ kind: "reels", id: reel.id, action: "remove" })}>Remove</button><button onClick={() => moderation.mutate({ kind: "reels", id: reel.id, action: "restore" })}>Restore</button><button onClick={() => moderation.mutate({ kind: "reels", id: reel.id, action: "retry-processing" })}>Retry</button></div></div>)}</div></section>;
 }
+function MessageReportsPanel({ token }: { token: string }) {
+  const client = useQueryClient();
+  const [kind, setKind] = useState<"messages" | "conversations">("messages");
+  const [status, setStatus] = useState("");
+  const reports = useQuery({ queryKey: ["message-reports", kind, status], queryFn: () => fetchMessageReports(token, kind, status) });
+  const moderation = useMutation({ mutationFn: ({ id, action }: { id: number; action: "pending" | "review" | "resolve" | "reject" }) => moderateMessageReport(token, kind, id, action, "Admin dashboard action"), onSuccess: () => client.invalidateQueries({ queryKey: ["message-reports"] }) });
+  return <section className="content-panel"><div className="toolbar"><h2>Private Message Reports</h2><select value={kind} onChange={(event) => setKind(event.target.value as "messages" | "conversations")}><option value="messages">Messages</option><option value="conversations">Conversations</option></select><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option><option value="pending">Pending</option><option value="under_review">Under review</option><option value="resolved">Resolved</option><option value="rejected">Rejected</option></select></div>{reports.isLoading ? <p>Loading reports...</p> : null}{reports.isError ? <p className="error">Reports could not be loaded.</p> : null}<div className="table">{(reports.data?.data.results ?? []).map((report) => <div className="row" key={`${kind}-${report.id}`}><div><strong>{report.reason}</strong><p>{report.details || "No details supplied."}</p><small>{report.status} · reporter @{report.reporter.username} · {report.message_id ?? report.conversation_id}</small></div><div className="actions"><button onClick={() => moderation.mutate({ id: report.id, action: "review" })}>Review</button><button onClick={() => moderation.mutate({ id: report.id, action: "resolve" })}>Resolve</button><button onClick={() => moderation.mutate({ id: report.id, action: "reject" })}>Reject</button></div></div>)}</div></section>;
+}
 function AdminApp() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -54,10 +63,12 @@ function AdminApp() {
         {user ? <div className="success">Signed in as {user.username}</div> : null}
         <button disabled={mutation.isPending} onClick={() => mutation.mutate()}><LockKeyhole size={18} /> {mutation.isPending ? "Checking..." : "Sign in"}</button>
       </section>
-      {token ? <><PostsPanel token={token} /><StoriesReelsPanel token={token} /></> : null}
+      {token ? <><PostsPanel token={token} /><StoriesReelsPanel token={token} /><MessageReportsPanel token={token} /></> : null}
     </main>
   );
 }
 
 createRoot(document.getElementById("root")!).render(<React.StrictMode><QueryClientProvider client={queryClient}><AdminApp /></QueryClientProvider></React.StrictMode>);
+
+
 
