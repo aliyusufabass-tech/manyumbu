@@ -1,5 +1,24 @@
 from django.urls import path
 
+from .post_views import (
+    AdminPostManagementView,
+    ArchivedPostsView,
+    CommentDetailView,
+    CommentLikeView,
+    FeedView,
+    HashtagPostsView,
+    PostArchiveView,
+    PostCollectionView,
+    PostCommentsView,
+    PostDetailView,
+    PostHideView,
+    PostLikeView,
+    PostLikesListView,
+    PostReportView,
+    PostSaveView,
+    SavedPostsView,
+    UserPostsView,
+)
 from .profile_views import (
     BlockView,
     CloseFriendsView,
@@ -51,6 +70,29 @@ urlpatterns = [
     path("relationships/muted/<str:username>/", MutedView.as_view(), name="muted-action"),
     path("relationships/close-friends/", CloseFriendsView.as_view(), name="close-friends-list"),
     path("relationships/close-friends/<str:username>/", CloseFriendsView.as_view(), name="close-friends-action"),
+    path("admin/posts/", AdminPostManagementView.as_view(), name="admin-posts"),
+    path("admin/posts/<uuid:post_id>/", AdminPostManagementView.as_view(), name="admin-post-detail"),
+    path("admin/posts/<uuid:post_id>/<str:action>/", AdminPostManagementView.as_view(), name="admin-post-action"),
+    path("posts/", PostCollectionView.as_view(), name="post-collection"),
+    path("posts/<uuid:post_id>/like/", PostLikeView.as_view(), name="post-like"),
+    path("posts/<uuid:post_id>/save/", PostSaveView.as_view(), name="post-save"),
+    path("posts/<uuid:post_id>/likes/", PostLikesListView.as_view(), name="post-likes"),
+    path("posts/<uuid:post_id>/comments/", PostCommentsView.as_view(), name="post-comments"),
+    path("posts/<uuid:post_id>/archive/", PostArchiveView.as_view(), {"action": "archive"}, name="post-archive"),
+    path("posts/<uuid:post_id>/restore/", PostArchiveView.as_view(), {"action": "restore"}, name="post-restore"),
+    path("posts/<uuid:post_id>/report/", PostReportView.as_view(), name="post-report"),
+    path("posts/<uuid:post_id>/hide/", PostHideView.as_view(), name="post-hide"),
+    path("posts/<uuid:post_id>/", PostDetailView.as_view(), name="post-detail"),
+    path("comments/<uuid:comment_id>/", CommentDetailView.as_view(), name="comment-detail"),
+    path("comments/<uuid:comment_id>/like/", CommentLikeView.as_view(), name="comment-like"),
+    path("feed/", FeedView.as_view(), name="feed"),
+    path("users/<str:username>/posts/", UserPostsView.as_view(), name="user-posts"),
+    path("me/saved-posts/", SavedPostsView.as_view(), name="saved-posts"),
+    path("me/archived-posts/", ArchivedPostsView.as_view(), name="archived-posts"),
+    path("hashtags/<str:hashtag>/posts/", HashtagPostsView.as_view(), name="hashtag-posts"),
     path("relationships/<str:list_name>/", RelationshipListView.as_view(), name="relationship-list"),
 ]
+
+
+
 

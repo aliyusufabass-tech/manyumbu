@@ -1,0 +1,6 @@
+import type { CompactUser } from "./profile";
+
+export type PostMedia = { id: string; url: string; secure_url: string; media_type: "image" | "video"; width: number | null; height: number | null; duration: number | null; file_size: number; display_order: number; thumbnail: string | null; upload_provider_id: string; created_at: string; };
+export type Post = { id: string; author: CompactUser; caption: string; post_type: "text" | "image" | "video"; audience: "public" | "followers" | "close_friends" | "selected" | "only_me" | null; comments_enabled: boolean; status: string; location_name: string; is_edited: boolean; published_at: string | null; created_at: string; updated_at: string; media: PostMedia[]; hashtags: string[]; tagged_users: CompactUser[]; mentions: CompactUser[]; like_count: number; comment_count: number; share_count: number; viewer_has_liked: boolean; viewer_has_saved: boolean; permissions: { can_edit: boolean; can_delete: boolean; can_archive: boolean; can_comment: boolean; can_like: boolean; can_save: boolean; }; };
+export type FeedPage = { results: Post[]; next_cursor: string | null };
+export type Comment = { id: string; post_id: string; author: CompactUser; parent_id: string | null; text: string; is_edited: boolean; is_deleted: boolean; like_count: number; viewer_has_liked: boolean; created_at: string; updated_at: string; };

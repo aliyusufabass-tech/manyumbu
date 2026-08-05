@@ -1,4 +1,5 @@
 from datetime import timedelta
+import uuid
 
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
@@ -297,3 +298,220 @@ class CloseFriend(models.Model):
             models.CheckConstraint(condition=~models.Q(owner=models.F("friend")), name="prevent_self_close_friend"),
         ]
         indexes = [models.Index(fields=["owner", "created_at"])]
+
+
+class Hashtag(models.Model):
+    name = models.CharField(max_length=80, unique=True)
+    display_name = models.CharField(max_length=80)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["name"])]
+
+
+class Post(models.Model):
+    TYPE_TEXT = "text"
+    TYPE_IMAGE = "image"
+    TYPE_VIDEO = "video"
+    TYPES = [(TYPE_TEXT, "Text"), (TYPE_IMAGE, "Image"), (TYPE_VIDEO, "Video")]
+    AUDIENCE_PUBLIC = "public"
+    AUDIENCE_FOLLOWERS = "followers"
+    AUDIENCE_CLOSE_FRIENDS = "close_friends"
+    AUDIENCE_SELECTED = "selected"
+    AUDIENCE_ONLY_ME = "only_me"
+    AUDIENCES = [(AUDIENCE_PUBLIC, "Public"), (AUDIENCE_FOLLOWERS, "Followers"), (AUDIENCE_CLOSE_FRIENDS, "Close friends"), (AUDIENCE_SELECTED, "Selected users"), (AUDIENCE_ONLY_ME, "Only me")]
+    STATUS_DRAFT = "draft"
+    STATUS_PUBLISHED = "published"
+    STATUS_ARCHIVED = "archived"
+    STATUS_REMOVED = "removed"
+    STATUS_DELETED = "deleted"
+    STATUSES = [(STATUS_DRAFT, "Draft"), (STATUS_PUBLISHED, "Published"), (STATUS_ARCHIVED, "Archived"), (STATUS_REMOVED, "Removed"), (STATUS_DELETED, "Deleted")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name="posts")
+    caption = models.TextField(blank=True, max_length=2200)
+    post_type = models.CharField(max_length=20, choices=TYPES, default=TYPE_TEXT)
+    audience = models.CharField(max_length=20, choices=AUDIENCES, default=AUDIENCE_PUBLIC)
+    comments_enabled = models.BooleanField(default=True)
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_PUBLISHED)
+    location_name = models.CharField(max_length=140, blank=True)
+    is_edited = models.BooleanField(default=False)
+    share_count = models.PositiveIntegerField(default=0)
+    published_at = models.DateTimeField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["author", "status", "published_at"]), models.Index(fields=["audience", "status", "published_at"]), models.Index(fields=["created_at"])]
+
+
+class PostMedia(models.Model):
+    MEDIA_IMAGE = "image"
+    MEDIA_VIDEO = "video"
+    TYPES = [(MEDIA_IMAGE, "Image"), (MEDIA_VIDEO, "Video")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="media")
+    file = models.FileField(upload_to="posts/")
+    media_url = models.URLField(blank=True)
+    secure_url = models.URLField(blank=True)
+    media_type = models.CharField(max_length=20, choices=TYPES)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    duration = models.FloatField(null=True, blank=True)
+    file_size = models.PositiveIntegerField(default=0)
+    display_order = models.PositiveSmallIntegerField(default=0)
+    thumbnail = models.FileField(upload_to="post-thumbnails/", null=True, blank=True)
+    upload_provider_id = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["post", "display_order"], name="unique_post_media_order")]
+        indexes = [models.Index(fields=["post", "display_order"])]
+
+
+class PostAudienceUser(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="selected_audience")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="selected_posts")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["post", "user"], name="unique_post_selected_audience")]
+
+
+class PostTag(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="tagged_users")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="tagged_posts")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["post", "user"], name="unique_post_tag")]
+
+
+class PostMention(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="mentions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="post_mentions")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["post", "user"], name="unique_post_mention")]
+
+
+class PostHashtag(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="hashtags")
+    hashtag = models.ForeignKey(Hashtag, on_delete=models.CASCADE, related_name="post_links")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["post", "hashtag"], name="unique_post_hashtag")]
+
+
+class PostLike(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="likes")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="post_likes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["post", "user"], name="unique_post_like")]
+        indexes = [models.Index(fields=["post", "created_at"])]
+
+
+class SavedPost(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="saves")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="saved_posts")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["post", "user"], name="unique_saved_post")]
+        indexes = [models.Index(fields=["user", "created_at"])]
+
+
+class HiddenPost(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="hidden_by")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="hidden_posts")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["post", "user"], name="unique_hidden_post")]
+
+
+class Comment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="comments")
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name="comments")
+    parent = models.ForeignKey("self", on_delete=models.CASCADE, related_name="replies", null=True, blank=True)
+    text = models.TextField(max_length=1000)
+    is_edited = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["post", "created_at"]), models.Index(fields=["parent", "created_at"])]
+
+
+class CommentLike(models.Model):
+    comment = models.ForeignKey(Comment, on_delete=models.CASCADE, related_name="likes")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="comment_likes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["comment", "user"], name="unique_comment_like")]
+
+
+class CommentMention(models.Model):
+    comment = models.ForeignKey(Comment, on_delete=models.CASCADE, related_name="mentions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="comment_mentions")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["comment", "user"], name="unique_comment_mention")]
+
+
+class Notification(models.Model):
+    TYPE_POST_LIKED = "post_liked"
+    TYPE_POST_COMMENTED = "post_commented"
+    TYPE_COMMENT_REPLIED = "comment_replied"
+    TYPE_COMMENT_LIKED = "comment_liked"
+    TYPE_POST_MENTION = "post_mention"
+    TYPE_COMMENT_MENTION = "comment_mention"
+    TYPE_POST_TAG = "post_tag"
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
+    actor = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications_created")
+    notification_type = models.CharField(max_length=40)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, null=True, blank=True)
+    comment = models.ForeignKey(Comment, on_delete=models.CASCADE, null=True, blank=True)
+    message = models.CharField(max_length=180, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["recipient", "is_read", "created_at"])]
+
+
+class PostReport(models.Model):
+    REASONS = [("spam", "Spam"), ("harassment", "Harassment"), ("hate", "Hate or abusive content"), ("nudity", "Nudity or sexual content"), ("violence", "Violence"), ("scam", "Scam or fraud"), ("false_information", "False information"), ("intellectual_property", "Intellectual property"), ("other", "Other")]
+    STATUS_PENDING = "pending"
+    STATUS_REVIEWED = "reviewed"
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="reports")
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name="post_reports")
+    reason = models.CharField(max_length=40, choices=REASONS)
+    details = models.TextField(blank=True, max_length=1000)
+    status = models.CharField(max_length=20, default=STATUS_PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["post", "reporter", "reason"], name="unique_post_report_reason")]
+
+
+class AdminAuditLog(models.Model):
+    admin_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="admin_audit_logs")
+    action = models.CharField(max_length=120)
+    target = models.CharField(max_length=255)
+    reason = models.TextField(blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["admin_user", "created_at"]), models.Index(fields=["action"])]

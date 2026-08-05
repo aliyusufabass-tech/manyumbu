@@ -12,3 +12,13 @@ button { border: 0; border-radius: 8px; padding: 14px 16px; color: #fff; backgro
 button:disabled { opacity: 0.65; cursor: wait; }
 .error { color: #b42318; }
 .success { color: #126c57; }
+.content-panel { width: min(100%, 980px); display: grid; gap: 14px; background: #fff; border: 1px solid #d8e2de; border-radius: 8px; padding: 24px; box-shadow: 0 16px 40px rgba(20, 35, 31, 0.08); }
+.toolbar { display: grid; grid-template-columns: 1fr minmax(180px, 280px) 160px; gap: 12px; align-items: center; }
+.toolbar h2 { margin: 0; }
+.table { display: grid; gap: 10px; }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; border-top: 1px solid #e6eeea; padding-top: 12px; }
+.row p { margin: 4px 0; }
+.row small { color: #52605b; }
+.actions { display: flex; gap: 8px; }
+.actions button { padding: 10px 12px; }
+@media (max-width: 760px) { .toolbar, .row { grid-template-columns: 1fr; } .actions { flex-wrap: wrap; } }

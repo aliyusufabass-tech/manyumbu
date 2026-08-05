@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import BlockedUser, CloseFriend, EmailVerificationCode, Follow, FollowRequest, GoogleAccount, MutedUser, PasswordResetCode, RestrictedUser, User, UserPrivacySettings, UserProfile, UserSession
+from .models import AdminAuditLog, BlockedUser, CloseFriend, Comment, CommentLike, EmailVerificationCode, Follow, FollowRequest, GoogleAccount, Hashtag, HiddenPost, MutedUser, Notification, PasswordResetCode, Post, PostAudienceUser, PostHashtag, PostLike, PostMedia, PostMention, PostReport, PostTag, RestrictedUser, SavedPost, User, UserPrivacySettings, UserProfile, UserSession
 
 
 @admin.register(User)
@@ -40,4 +40,21 @@ admin.site.register(BlockedUser)
 admin.site.register(RestrictedUser)
 admin.site.register(MutedUser)
 admin.site.register(CloseFriend)
+
+
+admin.site.register(Post)
+admin.site.register(PostMedia)
+admin.site.register(PostLike)
+admin.site.register(SavedPost)
+admin.site.register(HiddenPost)
+admin.site.register(PostTag)
+admin.site.register(PostMention)
+admin.site.register(PostAudienceUser)
+admin.site.register(Hashtag)
+admin.site.register(PostHashtag)
+admin.site.register(Comment)
+admin.site.register(CommentLike)
+admin.site.register(Notification)
+admin.site.register(PostReport)
+admin.site.register(AdminAuditLog)
 

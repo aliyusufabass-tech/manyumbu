@@ -284,3 +284,212 @@ class PhaseTwoProfileRelationshipTests(TestCase):
         self.patch_json_auth("/api/v1/profiles/me/", {"is_private": False}, token=self.bob_token)
         self.assertTrue(Follow.objects.filter(follower=self.alice, following=self.bob).exists())
 
+
+from django.core.files.uploadedfile import SimpleUploadedFile
+from .models import AdminAuditLog, Comment, HiddenPost, Hashtag, Notification, Post, PostLike, PostReport, SavedPost
+
+
+class PhaseThreePostFeedTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        User = get_user_model()
+        self.alice = User.objects.create_user("+255711000001", "pa@example.com", "postalice", "Post Alice", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.bob = User.objects.create_user("+255711000002", "pb@example.com", "postbob", "Post Bob", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.caro = User.objects.create_user("+255711000003", "pc@example.com", "postcaro", "Post Caro", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        for user in [self.alice, self.bob, self.caro]:
+            ensure_profile_records(user)
+        self.alice_token = issue_tokens(self.alice)["access"]
+        self.bob_token = issue_tokens(self.bob)["access"]
+        self.caro_token = issue_tokens(self.caro)["access"]
+
+    def auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def post_json(self, url, payload=None, token=None):
+        return self.client.post(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+
+    def patch_json(self, url, payload=None, token=None):
+        return self.client.patch(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+
+    def create_text_post(self, author_token=None, **extra):
+        payload = {"caption": "Hello #Manyumbu @postbob", "audience": "public", **extra}
+        response = self.post_json("/api/v1/posts/", payload, token=author_token or self.alice_token)
+        self.assertEqual(response.status_code, 201, response.content)
+        return Post.objects.get(id=response.json()["data"]["post"]["id"])
+
+    def test_text_post_creation_hashtags_and_mentions(self):
+        post = self.create_text_post()
+        self.assertEqual(post.post_type, Post.TYPE_TEXT)
+        self.assertTrue(Hashtag.objects.filter(name="manyumbu").exists())
+        self.assertTrue(post.mentions.filter(user=self.bob).exists())
+        self.assertTrue(Notification.objects.filter(recipient=self.bob, notification_type=Notification.TYPE_POST_MENTION).exists())
+
+    def test_empty_post_rejected_and_caption_limit(self):
+        response = self.post_json("/api/v1/posts/", {"caption": ""})
+        self.assertEqual(response.status_code, 400)
+        response = self.post_json("/api/v1/posts/", {"caption": "x" * 2201})
+        self.assertEqual(response.status_code, 400)
+
+    def test_image_post_creation_and_ordering(self):
+        first = SimpleUploadedFile("a.jpg", b"abc", content_type="image/jpeg")
+        second = SimpleUploadedFile("b.png", b"def", content_type="image/png")
+        response = self.client.post("/api/v1/posts/", {"caption": "photos", "media": [first, second]}, **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 201, response.content)
+        post = Post.objects.get(id=response.json()["data"]["post"]["id"])
+        self.assertEqual(post.post_type, Post.TYPE_IMAGE)
+        self.assertEqual(list(post.media.order_by("display_order").values_list("display_order", flat=True)), [0, 1])
+
+    def test_video_validation_rejects_mixed_media(self):
+        image = SimpleUploadedFile("a.jpg", b"abc", content_type="image/jpeg")
+        video = SimpleUploadedFile("v.mp4", b"video", content_type="video/mp4")
+        response = self.client.post("/api/v1/posts/", {"caption": "mixed", "media": [image, video]}, **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 400)
+
+    def test_public_followers_close_friends_selected_only_me_visibility(self):
+        public = self.create_text_post(caption="public")
+        followers = self.create_text_post(audience=Post.AUDIENCE_FOLLOWERS, caption="followers")
+        close = self.create_text_post(audience=Post.AUDIENCE_CLOSE_FRIENDS, caption="close")
+        selected = self.create_text_post(audience=Post.AUDIENCE_SELECTED, caption="selected", selected_users=["postbob"])
+        only_me = self.create_text_post(audience=Post.AUDIENCE_ONLY_ME, caption="only")
+        self.assertEqual(self.client.get(f"/api/v1/posts/{public.id}/", **self.auth(self.bob_token)).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/v1/posts/{followers.id}/", **self.auth(self.bob_token)).status_code, 403)
+        Follow.objects.create(follower=self.bob, following=self.alice)
+        self.assertEqual(self.client.get(f"/api/v1/posts/{followers.id}/", **self.auth(self.bob_token)).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/v1/posts/{close.id}/", **self.auth(self.bob_token)).status_code, 403)
+        CloseFriend.objects.create(owner=self.alice, friend=self.bob)
+        self.assertEqual(self.client.get(f"/api/v1/posts/{close.id}/", **self.auth(self.bob_token)).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/v1/posts/{selected.id}/", **self.auth(self.bob_token)).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/v1/posts/{only_me.id}/", **self.auth(self.bob_token)).status_code, 403)
+
+    def test_private_account_and_blocked_user_visibility(self):
+        self.alice.profile.is_private = True
+        self.alice.profile.save()
+        post = self.create_text_post(caption="private")
+        self.assertEqual(self.client.get(f"/api/v1/posts/{post.id}/", **self.auth(self.bob_token)).status_code, 403)
+        Follow.objects.create(follower=self.bob, following=self.alice)
+        self.assertEqual(self.client.get(f"/api/v1/posts/{post.id}/", **self.auth(self.bob_token)).status_code, 200)
+        BlockedUser.objects.create(blocker=self.alice, blocked=self.bob)
+        self.assertEqual(self.client.get(f"/api/v1/posts/{post.id}/", **self.auth(self.bob_token)).status_code, 403)
+
+    def test_muted_and_hidden_posts_are_filtered_from_feed(self):
+        post = self.create_text_post(caption="feed")
+        response = self.client.get("/api/v1/feed/", **self.auth(self.bob_token))
+        self.assertEqual(len(response.json()["data"]["results"]), 1)
+        MutedUser.objects.create(owner=self.bob, muted=self.alice, mute_posts=True)
+        response = self.client.get("/api/v1/feed/", **self.auth(self.bob_token))
+        self.assertEqual(len(response.json()["data"]["results"]), 0)
+        MutedUser.objects.all().delete()
+        self.post_json(f"/api/v1/posts/{post.id}/hide/", token=self.bob_token)
+        response = self.client.get("/api/v1/feed/", **self.auth(self.bob_token))
+        self.assertEqual(len(response.json()["data"]["results"]), 0)
+
+    def test_like_unlike_and_duplicate_like_prevention(self):
+        post = self.create_text_post()
+        self.assertEqual(self.post_json(f"/api/v1/posts/{post.id}/like/", token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/posts/{post.id}/like/", token=self.bob_token).status_code, 200)
+        self.assertEqual(PostLike.objects.filter(post=post, user=self.bob).count(), 1)
+        self.assertTrue(Notification.objects.filter(recipient=self.alice, notification_type=Notification.TYPE_POST_LIKED).exists())
+        response = self.client.delete(f"/api/v1/posts/{post.id}/like/", **self.auth(self.bob_token))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(PostLike.objects.filter(post=post, user=self.bob).exists())
+
+    def test_comments_replies_disabled_edit_delete_and_likes(self):
+        post = self.create_text_post()
+        response = self.post_json(f"/api/v1/posts/{post.id}/comments/", {"text": "Nice"}, token=self.bob_token)
+        self.assertEqual(response.status_code, 201, response.content)
+        comment_id = response.json()["data"]["comment"]["id"]
+        reply = self.post_json(f"/api/v1/posts/{post.id}/comments/", {"text": "Thanks", "parent_id": comment_id})
+        self.assertEqual(reply.status_code, 201)
+        self.assertEqual(self.post_json(f"/api/v1/comments/{comment_id}/like/").status_code, 200)
+        self.assertEqual(self.patch_json(f"/api/v1/comments/{comment_id}/", {"text": "Edited"}).status_code, 403)
+        self.assertEqual(self.patch_json(f"/api/v1/comments/{comment_id}/", {"text": "Edited"}, token=self.bob_token).status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/v1/comments/{comment_id}/", **self.auth(self.bob_token)).status_code, 200)
+        post.comments_enabled = False
+        post.save()
+        response = self.post_json(f"/api/v1/posts/{post.id}/comments/", {"text": "Nope"}, token=self.bob_token)
+        self.assertEqual(response.status_code, 403)
+
+    def test_saved_posts_private_to_saver(self):
+        post = self.create_text_post()
+        self.assertEqual(self.post_json(f"/api/v1/posts/{post.id}/save/", token=self.bob_token).status_code, 200)
+        self.assertTrue(SavedPost.objects.filter(post=post, user=self.bob).exists())
+        response = self.client.get("/api/v1/me/saved-posts/", **self.auth(self.bob_token))
+        self.assertEqual(response.json()["data"]["count"], 1)
+        response = self.client.delete(f"/api/v1/posts/{post.id}/save/", **self.auth(self.bob_token))
+        self.assertEqual(response.status_code, 200)
+
+    def test_archive_restore_and_soft_delete(self):
+        post = self.create_text_post()
+        self.assertEqual(self.post_json(f"/api/v1/posts/{post.id}/archive/").status_code, 200)
+        post.refresh_from_db()
+        self.assertEqual(post.status, Post.STATUS_ARCHIVED)
+        self.assertEqual(self.client.get("/api/v1/me/archived-posts/", **self.auth(self.alice_token)).json()["data"]["count"], 1)
+        self.assertEqual(self.post_json(f"/api/v1/posts/{post.id}/restore/").status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/v1/posts/{post.id}/", **self.auth(self.alice_token)).status_code, 200)
+        post.refresh_from_db()
+        self.assertEqual(post.status, Post.STATUS_DELETED)
+
+    def test_owner_only_edit_and_delete(self):
+        post = self.create_text_post()
+        self.assertEqual(self.patch_json(f"/api/v1/posts/{post.id}/", {"caption": "bad"}, token=self.bob_token).status_code, 403)
+        self.assertEqual(self.client.delete(f"/api/v1/posts/{post.id}/", **self.auth(self.bob_token)).status_code, 403)
+        response = self.patch_json(f"/api/v1/posts/{post.id}/", {"caption": "new #Zanzibar"})
+        self.assertEqual(response.status_code, 200)
+        post.refresh_from_db()
+        self.assertTrue(post.is_edited)
+        self.assertTrue(Hashtag.objects.filter(name="zanzibar").exists())
+
+    def test_hashtag_posts_and_feed_cursor_no_duplicates(self):
+        first = self.create_text_post(caption="one #tag")
+        second = self.create_text_post(caption="two #tag")
+        response = self.client.get("/api/v1/hashtags/tag/posts/", **self.auth(self.bob_token))
+        self.assertEqual(response.json()["data"]["count"], 2)
+        response = self.client.get("/api/v1/feed/?limit=1", **self.auth(self.bob_token))
+        first_page = response.json()["data"]
+        response = self.client.get(f"/api/v1/feed/?limit=1&cursor={first_page['next_cursor']}", **self.auth(self.bob_token))
+        second_page = response.json()["data"]
+        ids = [item["id"] for item in first_page["results"] + second_page["results"]]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_post_report_creation_and_blocked_tag_validation(self):
+        post = self.create_text_post()
+        response = self.post_json(f"/api/v1/posts/{post.id}/report/", {"reason": "spam", "details": "bad"}, token=self.bob_token)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(PostReport.objects.filter(post=post, reporter=self.bob, reason="spam").exists())
+        BlockedUser.objects.create(blocker=self.alice, blocked=self.caro)
+        response = self.post_json("/api/v1/posts/", {"caption": "tag", "tagged_users": ["postcaro"]})
+        self.assertEqual(response.status_code, 403)
+
+class PhaseThreeAdminPostManagementTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.admin = User.objects.create_user("+255722000001", "adminp@example.com", "postadmin", "Post Admin", "StrongerPass123!", date_of_birth="1990-01-01", is_active=True, is_email_verified=True, is_staff=True)
+        self.user = User.objects.create_user("+255722000002", "poster@example.com", "poster", "Poster", "StrongerPass123!", date_of_birth="1990-01-01", is_active=True, is_email_verified=True)
+        ensure_profile_records(self.admin)
+        ensure_profile_records(self.user)
+        self.admin_token = issue_tokens(self.admin)["access"]
+        self.user_token = issue_tokens(self.user)["access"]
+        self.client = Client()
+        self.post = Post.objects.create(author=self.user, caption="moderate me", published_at=timezone.now())
+
+    def auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_admin_can_list_remove_restore_posts_with_audit_log(self):
+        response = self.client.get("/api/v1/admin/posts/?q=moderate", **self.auth(self.admin_token))
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["data"]["count"], 1)
+        response = self.client.post(f"/api/v1/admin/posts/{self.post.id}/remove/", data=json.dumps({"reason": "policy"}), content_type="application/json", **self.auth(self.admin_token))
+        self.assertEqual(response.status_code, 200, response.content)
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.status, Post.STATUS_REMOVED)
+        self.assertTrue(AdminAuditLog.objects.filter(admin_user=self.admin, action="post_remove", target=str(self.post.id)).exists())
+        response = self.client.post(f"/api/v1/admin/posts/{self.post.id}/restore/", data=json.dumps({"reason": "appeal"}), content_type="application/json", **self.auth(self.admin_token))
+        self.assertEqual(response.status_code, 200)
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.status, Post.STATUS_PUBLISHED)
+
+    def test_non_staff_cannot_use_admin_post_management(self):
+        response = self.client.get("/api/v1/admin/posts/", **self.auth(self.user_token))
+        self.assertEqual(response.status_code, 403)
+
