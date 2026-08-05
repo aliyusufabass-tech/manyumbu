@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LockKeyhole, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { Bell, LockKeyhole, RotateCcw, ShieldCheck, Trash2, Users } from "lucide-react";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { adminLogin } from "./api/auth";
 import { fetchAdminPosts, moderatePost } from "./api/posts";
 import { fetchAdminReels, fetchAdminStories, moderateStoryReel } from "./api/phase4";
 import { fetchMessageReports, moderateMessageReport } from "./api/messaging";
+import { fetchAdminGroups, fetchGroupReports, moderateGroup, sendAnnouncement } from "./api/groups";
 import "./styles.css";
 
 const queryClient = new QueryClient();
@@ -44,6 +45,19 @@ function MessageReportsPanel({ token }: { token: string }) {
   const moderation = useMutation({ mutationFn: ({ id, action }: { id: number; action: "pending" | "review" | "resolve" | "reject" }) => moderateMessageReport(token, kind, id, action, "Admin dashboard action"), onSuccess: () => client.invalidateQueries({ queryKey: ["message-reports"] }) });
   return <section className="content-panel"><div className="toolbar"><h2>Private Message Reports</h2><select value={kind} onChange={(event) => setKind(event.target.value as "messages" | "conversations")}><option value="messages">Messages</option><option value="conversations">Conversations</option></select><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option><option value="pending">Pending</option><option value="under_review">Under review</option><option value="resolved">Resolved</option><option value="rejected">Rejected</option></select></div>{reports.isLoading ? <p>Loading reports...</p> : null}{reports.isError ? <p className="error">Reports could not be loaded.</p> : null}<div className="table">{(reports.data?.data.results ?? []).map((report) => <div className="row" key={`${kind}-${report.id}`}><div><strong>{report.reason}</strong><p>{report.details || "No details supplied."}</p><small>{report.status} · reporter @{report.reporter.username} · {report.message_id ?? report.conversation_id}</small></div><div className="actions"><button onClick={() => moderation.mutate({ id: report.id, action: "review" })}>Review</button><button onClick={() => moderation.mutate({ id: report.id, action: "resolve" })}>Resolve</button><button onClick={() => moderation.mutate({ id: report.id, action: "reject" })}>Reject</button></div></div>)}</div></section>;
 }
+function GroupModerationPanel({ token }: { token: string }) {
+  const client = useQueryClient();
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+  const [reportKind, setReportKind] = useState<"group-reports" | "group-message-reports">("group-reports");
+  const [title, setTitle] = useState("Service update");
+  const [body, setBody] = useState("");
+  const groups = useQuery({ queryKey: ["admin-groups", q, status], queryFn: () => fetchAdminGroups(token, { q, status }) });
+  const reports = useQuery({ queryKey: ["admin-group-reports", reportKind], queryFn: () => fetchGroupReports(token, reportKind) });
+  const moderation = useMutation({ mutationFn: ({ id, action }: { id: string; action: "suspend" | "restore" | "remove" | "warn-owner" }) => moderateGroup(token, id, action, "Admin dashboard action"), onSuccess: () => client.invalidateQueries({ queryKey: ["admin-groups"] }) });
+  const announcement = useMutation({ mutationFn: () => sendAnnouncement(token, title, body), onSuccess: () => setBody("") });
+  return <section className="content-panel"><div className="toolbar"><h2><Users size={20} /> Groups</h2><input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Search groups" /><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="deleted">Deleted</option></select></div>{groups.isError ? <p className="error">Groups could not be loaded.</p> : null}<div className="table">{(groups.data?.data.results ?? []).map((group) => <div className="row" key={group.id}><div><strong>{group.name}</strong><p>{group.description || "No description"}</p><small>{group.status} · {group.privacy} · {group.member_count} members · owner @{group.owner.username}</small></div><div className="actions"><button onClick={() => moderation.mutate({ id: group.id, action: "suspend" })}>Suspend</button><button onClick={() => moderation.mutate({ id: group.id, action: "restore" })}><RotateCcw size={16} /> Restore</button><button onClick={() => moderation.mutate({ id: group.id, action: "warn-owner" })}><Bell size={16} /> Warn</button><button onClick={() => moderation.mutate({ id: group.id, action: "remove" })}><Trash2 size={16} /> Remove</button></div></div>)}</div><div className="toolbar"><h2>Group Reports</h2><select value={reportKind} onChange={(event) => setReportKind(event.target.value as "group-reports" | "group-message-reports")}><option value="group-reports">Groups</option><option value="group-message-reports">Messages</option></select><span /></div><div className="table">{(reports.data?.data.results ?? []).map((report) => <div className="row" key={`${reportKind}-${report.id}`}><div><strong>{report.reason}</strong><p>{report.group_name ?? report.group_id}</p><small>{report.status} · reporter @{report.reporter.username} · {report.message_id ?? report.group_id}</small></div></div>)}</div><div className="toolbar"><h2>Announcement</h2><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title" /><button disabled={!body || announcement.isPending} onClick={() => announcement.mutate()}><Bell size={16} /> Send</button></div><textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write an in-app announcement" /></section>;
+}
 function AdminApp() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -63,12 +77,10 @@ function AdminApp() {
         {user ? <div className="success">Signed in as {user.username}</div> : null}
         <button disabled={mutation.isPending} onClick={() => mutation.mutate()}><LockKeyhole size={18} /> {mutation.isPending ? "Checking..." : "Sign in"}</button>
       </section>
-      {token ? <><PostsPanel token={token} /><StoriesReelsPanel token={token} /><MessageReportsPanel token={token} /></> : null}
+      {token ? <><PostsPanel token={token} /><StoriesReelsPanel token={token} /><MessageReportsPanel token={token} /><GroupModerationPanel token={token} /></> : null}
     </main>
   );
 }
 
 createRoot(document.getElementById("root")!).render(<React.StrictMode><QueryClientProvider client={queryClient}><AdminApp /></QueryClientProvider></React.StrictMode>);
-
-
 

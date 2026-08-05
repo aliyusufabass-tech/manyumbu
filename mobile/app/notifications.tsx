@@ -1,0 +1,14 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { router } from "expo-router";
+import { FlatList, Pressable, Switch, Text, View } from "react-native";
+import { getNotificationPreferences, listNotifications, markAllNotificationsRead, notificationAction, updateNotificationPreferences } from "../src/api/groups";
+
+export default function NotificationsScreen() {
+  const client = useQueryClient();
+  const notifications = useQuery({ queryKey: ["notifications"], queryFn: listNotifications });
+  const prefs = useQuery({ queryKey: ["notification-preferences"], queryFn: getNotificationPreferences });
+  const action = useMutation({ mutationFn: ({ id, name }: { id: string; name: "read" | "seen" }) => notificationAction(id, name), onSuccess: () => client.invalidateQueries({ queryKey: ["notifications"] }) });
+  const savePrefs = useMutation({ mutationFn: (payload: Record<string, boolean>) => updateNotificationPreferences(payload), onSuccess: () => client.invalidateQueries({ queryKey: ["notification-preferences"] }) });
+  const values = prefs.data?.data.preferences ?? {};
+  return <View style={{ flex: 1, backgroundColor: "#FFFFFF", paddingTop: 48, paddingHorizontal: 18 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}><Pressable onPress={() => router.back()}><Text style={{ color: "#126C57", fontWeight: "800" }}>Back</Text></Pressable><Pressable onPress={() => markAllNotificationsRead().then(() => client.invalidateQueries({ queryKey: ["notifications"] }))}><Text style={{ color: "#126C57", fontWeight: "900" }}>Read all</Text></Pressable></View><Text style={{ fontSize: 28, fontWeight: "900", marginTop: 16 }}>Notifications</Text><View style={{ borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 8, padding: 12, marginVertical: 12 }}><Text style={{ fontWeight: "900", marginBottom: 8 }}>Preferences</Text>{["group_messages", "group_mentions", "push_enabled", "email_enabled", "notification_previews"].map((key) => <View key={key} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6 }}><Text>{key.replace(/_/g, " ")}</Text><Switch value={Boolean(values[key])} onValueChange={(value) => savePrefs.mutate({ [key]: value })} /></View>)}</View><FlatList data={notifications.data?.data.results ?? []} keyExtractor={(item) => item.id} ListEmptyComponent={<Text style={{ color: "#6B7280", marginTop: 24 }}>No notifications.</Text>} renderItem={({ item }) => <Pressable onPress={() => action.mutate({ id: item.id, name: item.is_read ? "seen" : "read" })} style={{ paddingVertical: 12, borderBottomWidth: 1, borderColor: "#E5E7EB" }}><Text style={{ fontWeight: item.is_read ? "600" : "900" }}>{item.message}</Text><Text style={{ color: "#6B7280", marginTop: 4 }}>{item.type} · {new Date(item.created_at).toLocaleString()}</Text></Pressable>} /></View>;
+}

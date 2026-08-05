@@ -852,3 +852,149 @@ class PhaseFiveWebSocketTests(TransactionTestCase):
         self.assertTrue(UserPresence.objects.filter(user=self.alice).exists())
         async_to_sync(self.unauthorized_flow)()
         async_to_sync(self.non_member_flow)()
+
+from .models import AdminAnnouncement, Group, GroupInvitation, GroupJoinRequest, GroupMember, GroupMessage, GroupMessageDeliveryReceipt, GroupMessagePin, GroupMessageReaction, GroupMessageReadReceipt, GroupMessageReport, GroupMessageStar, GroupReport, NotificationPreference, PushNotificationDelivery
+
+
+class PhaseSixGroupNotificationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        User = get_user_model()
+        self.alice = User.objects.create_user("+255766000001", "ga@example.com", "groupalice", "Group Alice", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.bob = User.objects.create_user("+255766000002", "gb@example.com", "groupbob", "Group Bob", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.caro = User.objects.create_user("+255766000003", "gc@example.com", "groupcaro", "Group Caro", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.admin = User.objects.create_user("+255766000004", "gd@example.com", "groupadmin", "Group Admin", "StrongerPass123!", date_of_birth="1990-01-01", is_active=True, is_email_verified=True, is_staff=True)
+        for user in [self.alice, self.bob, self.caro, self.admin]:
+            ensure_profile_records(user)
+        self.alice_token = issue_tokens(self.alice)["access"]
+        self.bob_token = issue_tokens(self.bob)["access"]
+        self.caro_token = issue_tokens(self.caro)["access"]
+        self.admin_token = issue_tokens(self.admin)["access"]
+
+    def auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def post_json(self, url, payload=None, token=None):
+        return self.client.post(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+
+    def patch_json(self, url, payload=None, token=None):
+        return self.client.patch(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+
+    def create_group(self, **payload):
+        response = self.post_json("/api/v1/groups/", {"name": "Family Circle", "members": ["groupbob"], **payload})
+        self.assertEqual(response.status_code, 201, response.content)
+        return Group.objects.get(id=response.json()["data"]["group"]["id"])
+
+    def test_group_creation_members_roles_and_settings(self):
+        group = self.create_group(who_can_add_members=Group.PERM_ADMINS)
+        self.assertEqual(group.member_count, 2)
+        self.assertEqual(GroupMember.objects.get(group=group, user=self.alice).role, Group.ROLE_OWNER)
+        self.assertEqual(self.client.get("/api/v1/groups/", **self.auth(self.bob_token)).json()["data"]["count"], 1)
+        denied = self.post_json(f"/api/v1/groups/{group.id}/members/", {"username": "groupcaro"}, token=self.bob_token)
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(self.post_json(f"/api/v1/groups/{group.id}/roles/", {"username": "groupbob", "role": Group.ROLE_ADMIN}).status_code, 200)
+        allowed = self.post_json(f"/api/v1/groups/{group.id}/members/", {"username": "groupcaro"}, token=self.bob_token)
+        self.assertEqual(allowed.status_code, 200, allowed.content)
+        self.assertEqual(GroupMember.objects.filter(group=group, status=GroupMember.STATUS_ACTIVE).count(), 3)
+
+    def test_group_messages_actions_notifications_and_reports(self):
+        group = self.create_group(who_can_pin_messages=Group.PERM_ADMINS)
+        response = self.post_json(f"/api/v1/groups/{group.id}/messages/", {"text": "Hello @groupalice", "client_message_id": "g1"}, token=self.bob_token)
+        self.assertEqual(response.status_code, 201, response.content)
+        msg = GroupMessage.objects.get(id=response.json()["data"]["message"]["id"])
+        self.assertTrue(self.alice.notifications.filter(notification_type="group_message").exists())
+        self.assertTrue(self.alice.notifications.filter(notification_type="group_mention").exists())
+        self.assertEqual(self.post_json(f"/api/v1/group-messages/{msg.id}/react/", {"reaction": "love"}).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/group-messages/{msg.id}/star/").status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/group-messages/{msg.id}/pin/").status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/group-messages/{msg.id}/delivered/", {"device_id": "ios"}).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/group-messages/{msg.id}/read/").status_code, 200)
+        self.assertTrue(GroupMessageReaction.objects.filter(message=msg, reaction="love").exists())
+        self.assertTrue(GroupMessageStar.objects.filter(message=msg, user=self.alice).exists())
+        self.assertTrue(GroupMessagePin.objects.filter(message=msg, group=group).exists())
+        self.assertTrue(GroupMessageDeliveryReceipt.objects.filter(message=msg, user=self.alice).exists())
+        self.assertTrue(GroupMessageReadReceipt.objects.filter(message=msg, user=self.alice).exists())
+        report = self.post_json(f"/api/v1/group-messages/{msg.id}/report/", {"reason": "spam"})
+        self.assertEqual(report.status_code, 200)
+        self.assertTrue(GroupMessageReport.objects.filter(message=msg, reporter=self.alice).exists())
+        self.assertEqual(self.client.delete(f"/api/v1/group-messages/{msg.id}/for-me/", **self.auth(self.alice_token)).status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/v1/group-messages/{msg.id}/for-everyone/", **self.auth(self.bob_token)).status_code, 200)
+
+    def test_invitations_join_requests_notifications_and_admin_moderation(self):
+        group = self.create_group(who_can_join=Group.JOIN_APPROVAL)
+        invite = self.post_json(f"/api/v1/groups/{group.id}/invitations/", {"expires_hours": 2, "max_uses": 3})
+        self.assertEqual(invite.status_code, 201, invite.content)
+        token = invite.json()["data"]["token"]
+        join = self.post_json(f"/api/v1/group-invitations/{token}/join/", token=self.caro_token)
+        self.assertEqual(join.status_code, 200, join.content)
+        self.assertFalse(join.json()["data"]["joined"])
+        req = GroupJoinRequest.objects.get(group=group, requester=self.caro)
+        self.assertEqual(self.post_json(f"/api/v1/groups/{group.id}/join-requests/{req.id}/approve/").status_code, 200)
+        self.assertTrue(GroupMember.objects.filter(group=group, user=self.caro, status=GroupMember.STATUS_ACTIVE).exists())
+        self.assertEqual(self.post_json(f"/api/v1/groups/{group.id}/report/", {"reason": "spam"}, token=self.caro_token).status_code, 200)
+        self.assertTrue(GroupReport.objects.filter(group=group, reporter=self.caro).exists())
+        self.assertEqual(self.client.get("/api/v1/admin/groups/", **self.auth(self.bob_token)).status_code, 403)
+        self.assertEqual(self.client.get("/api/v1/admin/groups/?kind=group-reports", **self.auth(self.admin_token)).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/admin/groups/{group.id}/suspend/", {"reason": "policy"}, token=self.admin_token).status_code, 200)
+        group.refresh_from_db()
+        self.assertEqual(group.status, Group.STATUS_SUSPENDED)
+        announcement = self.post_json("/api/v1/admin/announcements/announcement/", {"title": "Service update", "body": "Group rules refreshed."}, token=self.admin_token)
+        self.assertEqual(announcement.status_code, 200, announcement.content)
+        self.assertTrue(AdminAnnouncement.objects.filter(title="Service update").exists())
+
+    def test_notification_preferences_read_seen_delete_and_push_queue(self):
+        group = self.create_group()
+        self.post_json(f"/api/v1/groups/{group.id}/messages/", {"text": "Ping", "client_message_id": "notify1"}, token=self.bob_token)
+        listing = self.client.get("/api/v1/notifications/", **self.auth(self.alice_token))
+        self.assertEqual(listing.status_code, 200, listing.content)
+        notification_id = listing.json()["data"]["results"][0]["id"]
+        self.assertEqual(self.post_json(f"/api/v1/notifications/{notification_id}/seen/").status_code, 200)
+        self.assertEqual(self.post_json("/api/v1/notifications/read-all/").status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/v1/notifications/{notification_id}/delete/", **self.auth(self.alice_token)).status_code, 200)
+        prefs = self.patch_json("/api/v1/notification-preferences/", {"group_messages": False, "push_enabled": False, "security_alerts": False})
+        self.assertEqual(prefs.status_code, 200)
+        self.assertFalse(NotificationPreference.objects.get(user=self.alice).group_messages)
+        self.assertTrue(NotificationPreference.objects.get(user=self.alice).security_alerts)
+
+
+class PhaseSixGroupWebSocketTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        User = get_user_model()
+        self.alice = User.objects.create_user("+255777000001", "gwa@example.com", "gwsalice", "Group Ws Alice", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.bob = User.objects.create_user("+255777000002", "gwb@example.com", "gwsbob", "Group Ws Bob", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.stranger = User.objects.create_user("+255777000003", "gwc@example.com", "gwsstranger", "Group Ws Stranger", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        for user in [self.alice, self.bob, self.stranger]:
+            ensure_profile_records(user)
+        self.alice_token = issue_tokens(self.alice)["access"]
+        self.stranger_token = issue_tokens(self.stranger)["access"]
+        self.group = Group.objects.create(owner=self.alice, name="Socket Group")
+        GroupMember.objects.create(group=self.group, user=self.alice, role=Group.ROLE_OWNER)
+        GroupMember.objects.create(group=self.group, user=self.bob, role=Group.ROLE_MEMBER)
+        self.group.member_count = 2
+        self.group.save(update_fields=["member_count"])
+
+    async def group_flow(self):
+        communicator = WebsocketCommunicator(application, f"/ws/groups/{self.group.id}/?token={self.alice_token}")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        ready = await communicator.receive_json_from()
+        self.assertEqual(ready["event"], "connection.ready")
+        await communicator.send_json_to({"event": "group.message.send", "request_id": "gw1", "data": {"text": "hello group ws", "client_message_id": "gw1"}})
+        created = await communicator.receive_json_from()
+        self.assertEqual(created["event"], "group.message.created")
+        await communicator.send_json_to({"event": "group.typing.start", "request_id": "typing", "data": {}})
+        typing = await communicator.receive_json_from()
+        self.assertEqual(typing["event"], "group.typing.updated")
+        await communicator.disconnect()
+
+    async def non_member_flow(self):
+        communicator = WebsocketCommunicator(application, f"/ws/groups/{self.group.id}/?token={self.stranger_token}")
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+
+    def test_group_websocket_auth_membership_and_message_send(self):
+        async_to_sync(self.group_flow)()
+        self.assertTrue(GroupMessage.objects.filter(group=self.group, text="hello group ws").exists())
+        async_to_sync(self.non_member_flow)()

@@ -1,0 +1,5 @@
+export function validateGroupName(name: string) { const trimmed = name.trim(); if (!trimmed) return "Group name is required."; if (trimmed.length > 120) return "Group name must be 120 characters or fewer."; return null; }
+export function validateGroupDescription(description: string) { if (description.length > 1000) return "Group description must be 1000 characters or fewer."; return null; }
+export function parseMemberInput(input: string) { return input.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean).filter((item, index, all) => all.indexOf(item) === index); }
+export function validateGroupMessage(text: string, hasAttachment = false) { const trimmed = text.replace(/\x00/g, "").trim(); if (!trimmed && !hasAttachment) return "Message text or an attachment is required."; if (trimmed.length > 5000) return "Message text must be 5000 characters or fewer."; return null; }
+export function canModerateRole(viewerRole?: string | null) { return viewerRole === "owner" || viewerRole === "admin" || viewerRole === "moderator"; }

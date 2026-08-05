@@ -1,5 +1,20 @@
 from django.urls import path
 
+from .group_views import (
+    AdminGroupModerationView,
+    GroupDetailView,
+    GroupInvitationJoinView,
+    GroupInvitationView,
+    GroupJoinRequestView,
+    GroupListView,
+    GroupMembersView,
+    GroupMembershipActionView,
+    GroupMessageActionView,
+    GroupMessagesView,
+    GroupSearchMediaView,
+    NotificationPreferenceView,
+    NotificationView,
+)
 from .messaging_views import (
     AdminMessageReportView,
     ConversationDetailView,
@@ -108,6 +123,28 @@ urlpatterns = [
     path("relationships/muted/<str:username>/", MutedView.as_view(), name="muted-action"),
     path("relationships/close-friends/", CloseFriendsView.as_view(), name="close-friends-list"),
     path("relationships/close-friends/<str:username>/", CloseFriendsView.as_view(), name="close-friends-action"),
+    path("groups/", GroupListView.as_view(), name="group-list"),
+    path("groups/<uuid:group_id>/", GroupDetailView.as_view(), name="group-detail"),
+    path("groups/<uuid:group_id>/members/", GroupMembersView.as_view(), name="group-members"),
+    path("groups/<uuid:group_id>/members/<str:user_identifier>/", GroupMembersView.as_view(), name="group-member-detail"),
+    path("groups/<uuid:group_id>/messages/", GroupMessagesView.as_view(), name="group-messages"),
+    path("groups/<uuid:group_id>/search/", GroupSearchMediaView.as_view(), {"kind": "search"}, name="group-search"),
+    path("groups/<uuid:group_id>/media/", GroupSearchMediaView.as_view(), {"kind": "media"}, name="group-media"),
+    path("groups/<uuid:group_id>/invitations/", GroupInvitationView.as_view(), name="group-invitations"),
+    path("groups/<uuid:group_id>/invitations/<uuid:invitation_id>/", GroupInvitationView.as_view(), name="group-invitation-detail"),
+    path("group-invitations/<str:token>/join/", GroupInvitationJoinView.as_view(), name="group-invitation-join"),
+    path("groups/<uuid:group_id>/join-requests/", GroupJoinRequestView.as_view(), name="group-join-requests"),
+    path("groups/<uuid:group_id>/join-requests/<uuid:request_id>/<str:action>/", GroupJoinRequestView.as_view(), name="group-join-request-action"),
+    path("groups/<uuid:group_id>/<str:action>/", GroupMembershipActionView.as_view(), name="group-action"),
+    path("group-messages/<uuid:message_id>/", GroupMessageActionView.as_view(), name="group-message-detail"),
+    path("group-messages/<uuid:message_id>/<str:action>/", GroupMessageActionView.as_view(), name="group-message-action"),
+    path("notifications/", NotificationView.as_view(), name="notifications"),
+    path("notifications/read-all/", NotificationView.as_view(), {"action": "read-all"}, name="notifications-read-all"),
+    path("notifications/<uuid:notification_id>/<str:action>/", NotificationView.as_view(), name="notification-action"),
+    path("notification-preferences/", NotificationPreferenceView.as_view(), name="notification-preferences"),
+    path("admin/groups/", AdminGroupModerationView.as_view(), name="admin-groups"),
+    path("admin/groups/<uuid:group_id>/<str:action>/", AdminGroupModerationView.as_view(), name="admin-group-action"),
+    path("admin/announcements/<str:action>/", AdminGroupModerationView.as_view(), name="admin-announcements"),
     path("conversations/", ConversationListView.as_view(), name="conversation-list"),
     path("conversations/sync/", MessagingSyncView.as_view(), {"kind": "conversations"}, name="conversation-sync"),
     path("conversations/<uuid:conversation_id>/", ConversationDetailView.as_view(), name="conversation-detail"),
@@ -172,13 +209,4 @@ urlpatterns = [
     path("hashtags/<str:hashtag>/posts/", HashtagPostsView.as_view(), name="hashtag-posts"),
     path("relationships/<str:list_name>/", RelationshipListView.as_view(), name="relationship-list"),
 ]
-
-
-
-
-
-
-
-
-
 

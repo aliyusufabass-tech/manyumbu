@@ -486,13 +486,23 @@ class Notification(models.Model):
     TYPE_POST_MENTION = "post_mention"
     TYPE_COMMENT_MENTION = "comment_mention"
     TYPE_POST_TAG = "post_tag"
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, db_index=True)
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     actor = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications_created")
-    notification_type = models.CharField(max_length=40)
+    notification_type = models.CharField(max_length=60)
+    object_type = models.CharField(max_length=60, blank=True)
+    object_uuid = models.CharField(max_length=80, blank=True)
+    safe_payload = models.JSONField(default=dict, blank=True)
     post = models.ForeignKey(Post, on_delete=models.CASCADE, null=True, blank=True)
     comment = models.ForeignKey(Comment, on_delete=models.CASCADE, null=True, blank=True)
     message = models.CharField(max_length=180, blank=True)
     is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+    seen_at = models.DateTimeField(null=True, blank=True)
+    push_status = models.CharField(max_length=30, default="not_configured")
+    email_status = models.CharField(max_length=30, default="not_sent")
+    priority = models.CharField(max_length=20, default="normal")
+    grouping_key = models.CharField(max_length=120, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -1162,5 +1172,396 @@ class WebSocketSession(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=["user", "disconnected_at"]), models.Index(fields=["channel_name"])]
+
+
+
+class Group(models.Model):
+    PRIVACY_PRIVATE = "private"
+    PRIVACY_INVITE_ONLY = "invite_only"
+    PRIVACY_PUBLIC = "public"
+    PRIVACIES = [(PRIVACY_PRIVATE, "Private"), (PRIVACY_INVITE_ONLY, "Invite only"), (PRIVACY_PUBLIC, "Public")]
+    ROLE_OWNER = "owner"
+    ROLE_ADMIN = "admin"
+    ROLE_MODERATOR = "moderator"
+    ROLE_MEMBER = "member"
+    ROLE_CHOICES = [(ROLE_OWNER, "Owner"), (ROLE_ADMIN, "Administrator"), (ROLE_MODERATOR, "Moderator"), (ROLE_MEMBER, "Member")]
+    PERM_EVERYONE = "everyone"
+    PERM_MODERATORS = "moderators"
+    PERM_ADMINS = "admins"
+    PERM_OWNER = "owner"
+    PERM_CHOICES = [(PERM_EVERYONE, "Everyone"), (PERM_MODERATORS, "Moderators and admins"), (PERM_ADMINS, "Admins"), (PERM_OWNER, "Owner")]
+    JOIN_DIRECT = "direct"
+    JOIN_APPROVAL = "approval"
+    JOIN_INVITE = "invite"
+    JOIN_CHOICES = [(JOIN_DIRECT, "Direct"), (JOIN_APPROVAL, "Approval"), (JOIN_INVITE, "Invite")]
+    STATUS_ACTIVE = "active"
+    STATUS_SUSPENDED = "suspended"
+    STATUS_DELETED = "deleted"
+    STATUS_ARCHIVED = "archived"
+    STATUSES = [(STATUS_ACTIVE, "Active"), (STATUS_SUSPENDED, "Suspended"), (STATUS_DELETED, "Deleted"), (STATUS_ARCHIVED, "Archived")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True, max_length=1000)
+    image = models.ImageField(upload_to="groups/", null=True, blank=True)
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="owned_groups")
+    privacy = models.CharField(max_length=20, choices=PRIVACIES, default=PRIVACY_PRIVATE)
+    member_count = models.PositiveIntegerField(default=0)
+    maximum_members = models.PositiveIntegerField(default=256)
+    who_can_join = models.CharField(max_length=20, choices=JOIN_CHOICES, default=JOIN_INVITE)
+    who_can_send_messages = models.CharField(max_length=20, choices=PERM_CHOICES, default=PERM_EVERYONE)
+    who_can_edit_info = models.CharField(max_length=20, choices=PERM_CHOICES, default=PERM_ADMINS)
+    who_can_add_members = models.CharField(max_length=20, choices=PERM_CHOICES, default=PERM_ADMINS)
+    who_can_approve_members = models.CharField(max_length=20, choices=PERM_CHOICES, default=PERM_ADMINS)
+    who_can_create_invites = models.CharField(max_length=20, choices=PERM_CHOICES, default=PERM_ADMINS)
+    who_can_pin_messages = models.CharField(max_length=20, choices=PERM_CHOICES, default=PERM_MODERATORS)
+    who_can_mention_everyone = models.CharField(max_length=20, choices=PERM_CHOICES, default=PERM_ADMINS)
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_ACTIVE)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        indexes = [models.Index(fields=["privacy", "status", "updated_at"]), models.Index(fields=["owner", "created_at"]), models.Index(fields=["last_message_at"])]
+
+
+class GroupRole(models.Model):
+    name = models.CharField(max_length=20, unique=True)
+    permissions = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class GroupSettings(models.Model):
+    group = models.OneToOneField(Group, on_delete=models.CASCADE, related_name="settings")
+    require_join_approval = models.BooleanField(default=False)
+    allow_invitation_links = models.BooleanField(default=True)
+    allow_member_invites = models.BooleanField(default=False)
+    message_rate_limit_per_minute = models.PositiveIntegerField(default=30)
+    mention_everyone_rate_limit_per_day = models.PositiveIntegerField(default=3)
+    keep_archived_on_new_message = models.BooleanField(default=False)
+    notification_overrides = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class GroupMember(models.Model):
+    STATUS_ACTIVE = "active"
+    STATUS_LEFT = "left"
+    STATUS_REMOVED = "removed"
+    STATUS_BANNED = "banned"
+    STATUSES = [(STATUS_ACTIVE, "Active"), (STATUS_LEFT, "Left"), (STATUS_REMOVED, "Removed"), (STATUS_BANNED, "Banned")]
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="members")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_memberships")
+    role = models.CharField(max_length=20, choices=Group.ROLE_CHOICES, default=Group.ROLE_MEMBER)
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_ACTIVE)
+    joined_at = models.DateTimeField(auto_now_add=True)
+    last_read_message = models.ForeignKey("GroupMessage", on_delete=models.SET_NULL, null=True, blank=True, related_name="last_read_by_members")
+    last_read_at = models.DateTimeField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    muted_until = models.DateTimeField(null=True, blank=True)
+    cleared_before = models.DateTimeField(null=True, blank=True)
+    marked_unread = models.BooleanField(default=False)
+    notification_preference = models.CharField(max_length=20, default="all")
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["group", "user"], name="unique_group_member")]
+        indexes = [models.Index(fields=["group", "role", "status"]), models.Index(fields=["user", "status", "updated_at"])]
+
+
+class GroupInvitation(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="invitations")
+    creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="created_group_invitations")
+    token_hash = models.CharField(max_length=128, unique=True)
+    token_preview = models.CharField(max_length=16, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    max_uses = models.PositiveIntegerField(null=True, blank=True)
+    use_count = models.PositiveIntegerField(default=0)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        indexes = [models.Index(fields=["group", "revoked_at", "expires_at"])]
+
+
+class GroupJoinRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CANCELED = "canceled"
+    STATUSES = [(STATUS_PENDING, "Pending"), (STATUS_APPROVED, "Approved"), (STATUS_REJECTED, "Rejected"), (STATUS_CANCELED, "Canceled")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="join_requests")
+    requester = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_join_requests")
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_PENDING)
+    decided_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="decided_group_join_requests")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    message = models.CharField(max_length=280, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["group", "requester", "status"], name="unique_group_join_request_state")]
+        indexes = [models.Index(fields=["group", "status", "created_at"])]
+
+
+class GroupBan(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="bans")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_bans")
+    banned_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="issued_group_bans")
+    reason = models.CharField(max_length=280, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["group", "user"], name="unique_group_ban")]
+
+
+class GroupRestriction(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="restrictions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_restrictions")
+    restricted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="issued_group_restrictions")
+    restrict_messages = models.BooleanField(default=True)
+    restrict_media = models.BooleanField(default=False)
+    restrict_links = models.BooleanField(default=False)
+    reason = models.CharField(max_length=280, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["group", "user"], name="unique_group_restriction")]
+
+
+class GroupMessage(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_group_messages")
+    message_type = models.CharField(max_length=30, choices=Message.TYPES, default=Message.TYPE_TEXT)
+    text = models.TextField(blank=True, max_length=5000)
+    reply_to = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True, related_name="replies")
+    client_message_id = models.CharField(max_length=80, blank=True)
+    shared_content = models.JSONField(default=dict, blank=True)
+    location_payload = models.JSONField(default=dict, blank=True)
+    contact_payload = models.JSONField(default=dict, blank=True)
+    is_forwarded = models.BooleanField(default=False)
+    forwarded_from = models.JSONField(default=dict, blank=True)
+    mentioned_usernames = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=20, default=Message.STATUS_SENT)
+    is_system = models.BooleanField(default=False)
+    is_edited = models.BooleanField(default=False)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    deleted_for_everyone_at = models.DateTimeField(null=True, blank=True)
+    removed_by_moderator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="moderated_group_messages")
+    moderation_reason = models.CharField(max_length=280, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["sender", "client_message_id"], condition=~models.Q(client_message_id=""), name="unique_group_message_client_id")]
+        indexes = [models.Index(fields=["group", "created_at"]), models.Index(fields=["sender", "created_at"])]
+
+
+class GroupMessageAttachment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(GroupMessage, on_delete=models.CASCADE, related_name="attachments")
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_message_attachments")
+    file = models.FileField(upload_to="group-messages/", null=True, blank=True)
+    kind = models.CharField(max_length=30, choices=MessageAttachment.KINDS)
+    file_name = models.CharField(max_length=180)
+    mime_type = models.CharField(max_length=120)
+    file_size = models.PositiveIntegerField(default=0)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    duration = models.FloatField(null=True, blank=True)
+    thumbnail = models.FileField(upload_to="group-message-thumbnails/", null=True, blank=True)
+    waveform = models.JSONField(default=list, blank=True)
+    processing_status = models.CharField(max_length=20, default=MessageAttachment.PROCESSING_READY)
+    malware_scan_status = models.CharField(max_length=20, default="pending")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class GroupMessageReaction(models.Model):
+    message = models.ForeignKey(GroupMessage, on_delete=models.CASCADE, related_name="reactions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_message_reactions")
+    reaction = models.CharField(max_length=20, choices=MessageReaction.REACTIONS)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "user"], name="unique_group_message_reaction")]
+
+
+class GroupMessageReadReceipt(models.Model):
+    message = models.ForeignKey(GroupMessage, on_delete=models.CASCADE, related_name="read_receipts")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_message_read_receipts")
+    read_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "user"], name="unique_group_message_read_receipt")]
+
+
+class GroupMessageDeliveryReceipt(models.Model):
+    message = models.ForeignKey(GroupMessage, on_delete=models.CASCADE, related_name="delivery_receipts")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_message_delivery_receipts")
+    delivered_at = models.DateTimeField(auto_now_add=True)
+    device_id = models.CharField(max_length=120, blank=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "user", "device_id"], name="unique_group_message_delivery")]
+
+
+class GroupMessageDeletion(models.Model):
+    message = models.ForeignKey(GroupMessage, on_delete=models.CASCADE, related_name="deleted_for")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_message_deletions")
+    deleted_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "user"], name="unique_group_message_delete")]
+
+
+class GroupMessageStar(models.Model):
+    message = models.ForeignKey(GroupMessage, on_delete=models.CASCADE, related_name="stars")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_message_stars")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "user"], name="unique_group_message_star")]
+
+
+class GroupMessagePin(models.Model):
+    message = models.ForeignKey(GroupMessage, on_delete=models.CASCADE, related_name="pins")
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="message_pins")
+    pinned_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_message_pins")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "group"], name="unique_group_message_pin")]
+
+
+class GroupMute(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="mute_records")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_mutes")
+    muted_until = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["group", "user"], name="unique_group_mute")]
+
+
+class GroupArchive(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="archive_records")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_archives")
+    archived_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["group", "user"], name="unique_group_archive")]
+
+
+class GroupClearState(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="clear_states")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_clear_states")
+    cleared_before = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["group", "user"], name="unique_group_clear_state")]
+
+
+class GroupReport(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="reports")
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_reports")
+    reason = models.CharField(max_length=40, choices=PostReport.REASONS)
+    details = models.TextField(blank=True, max_length=1000)
+    status = models.CharField(max_length=20, choices=MessageReport.STATUSES, default=MessageReport.STATUS_PENDING)
+    context_snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["group", "reporter", "reason"], name="unique_group_report_reason")]
+
+
+class GroupMessageReport(models.Model):
+    message = models.ForeignKey(GroupMessage, on_delete=models.CASCADE, related_name="reports")
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_message_reports")
+    reason = models.CharField(max_length=40, choices=PostReport.REASONS)
+    details = models.TextField(blank=True, max_length=1000)
+    status = models.CharField(max_length=20, choices=MessageReport.STATUSES, default=MessageReport.STATUS_PENDING)
+    context_snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["message", "reporter", "reason"], name="unique_group_message_report_reason")]
+
+
+class GroupAuditLog(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="audit_logs")
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="group_audit_logs")
+    action = models.CharField(max_length=120)
+    target = models.CharField(max_length=255, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        indexes = [models.Index(fields=["group", "created_at"]), models.Index(fields=["action"])]
+
+
+class NotificationPreference(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="notification_preferences")
+    private_messages = models.BooleanField(default=True)
+    message_requests = models.BooleanField(default=True)
+    group_messages = models.BooleanField(default=True)
+    group_mentions = models.BooleanField(default=True)
+    group_role_changes = models.BooleanField(default=True)
+    followers = models.BooleanField(default=True)
+    likes = models.BooleanField(default=True)
+    comments = models.BooleanField(default=True)
+    story_reactions = models.BooleanField(default=True)
+    reel_activity = models.BooleanField(default=True)
+    security_alerts = models.BooleanField(default=True)
+    marketing = models.BooleanField(default=False)
+    push_enabled = models.BooleanField(default=True)
+    email_enabled = models.BooleanField(default=True)
+    in_app_enabled = models.BooleanField(default=True)
+    notification_previews = models.BooleanField(default=True)
+    sound = models.BooleanField(default=True)
+    vibration = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class NotificationDelivery(models.Model):
+    notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name="delivery_records")
+    channel = models.CharField(max_length=20, default="in_app")
+    status = models.CharField(max_length=20, default="pending")
+    provider_message = models.CharField(max_length=255, blank=True)
+    attempted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class PushNotificationDelivery(models.Model):
+    notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name="push_deliveries")
+    device = models.ForeignKey(UserDevice, on_delete=models.SET_NULL, null=True, blank=True, related_name="push_deliveries")
+    status = models.CharField(max_length=30, default="not_configured")
+    provider = models.CharField(max_length=40, default="expo")
+    provider_response = models.JSONField(default=dict, blank=True)
+    deep_link = models.CharField(max_length=255, blank=True)
+    attempted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class NotificationBatch(models.Model):
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notification_batches")
+    grouping_key = models.CharField(max_length=120)
+    notification_type = models.CharField(max_length=60)
+    count = models.PositiveIntegerField(default=1)
+    latest_notification = models.ForeignKey(Notification, on_delete=models.SET_NULL, null=True, blank=True, related_name="latest_for_batches")
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["recipient", "grouping_key"], name="unique_notification_batch")]
+
+
+class AdminAnnouncement(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_SCHEDULED = "scheduled"
+    STATUS_SENT = "sent"
+    STATUS_CANCELED = "canceled"
+    title = models.CharField(max_length=120)
+    body = models.TextField(max_length=1000)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="admin_announcements")
+    target = models.CharField(max_length=40, default="all")
+    payload = models.JSONField(default=dict, blank=True)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, default=STATUS_DRAFT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 

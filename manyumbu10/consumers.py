@@ -150,3 +150,39 @@ class NotificationsConsumer(EnvelopeConsumer):
         if hasattr(self, "group_name"):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
+
+class GroupConsumer(EnvelopeConsumer):
+    async def connect(self):
+        if await self.reject_anonymous(): return
+        self.group_id = self.scope["url_route"]["kwargs"]["group_id"]
+        if not await self.is_member(): await self.close(code=4403); return
+        self.group_name = f"group.{self.group_id}"
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+        await self.send_event("connection.ready", {"group_id": str(self.group_id)})
+    async def disconnect(self, code):
+        if hasattr(self, "group_name"): await self.channel_layer.group_discard(self.group_name, self.channel_name)
+    async def receive_json(self, content, **kwargs):
+        event = content.get("event"); request_id = content.get("request_id"); data = content.get("data", {}) or {}
+        try:
+            if event == "group.message.send":
+                payload = await self.create_group_message(data)
+                await self.channel_layer.group_send(self.group_name, {"type": "relay.event", "payload": {"event": "group.message.created", "version": self.event_version, "data": payload, "request_id": request_id}})
+            elif event in {"group.typing.start", "group.typing.stop", "group.recording.start", "group.recording.stop"}:
+                await self.channel_layer.group_send(self.group_name, {"type": "relay.event", "payload": {"event": event.replace("start", "updated").replace("stop", "updated"), "version": self.event_version, "data": {"username": self.scope["user"].username, "active": event.endswith("start")}, "request_id": request_id}})
+            elif event == "group.presence.heartbeat":
+                await self.send_event("group.message.acknowledged", {"ok": True}, request_id)
+            else:
+                await self.send_event("error", {"message": "Unknown event."}, request_id)
+        except Exception as exc:
+            await self.send_event("error", {"message": str(exc)}, request_id)
+    @database_sync_to_async
+    def is_member(self):
+        from .models import Group, GroupMember, GroupBan
+        return GroupMember.objects.filter(group_id=self.group_id, user=self.scope["user"], status=GroupMember.STATUS_ACTIVE).exists() and not GroupBan.objects.filter(group_id=self.group_id, user=self.scope["user"], revoked_at__isnull=True).exists()
+    @database_sync_to_async
+    def create_group_message(self, data):
+        from .models import Group
+        from .group_services import create_group_message, group_message_payload
+        msg, _ = create_group_message(Group.objects.get(id=self.group_id), self.scope["user"], {"message_type": data.get("message_type", "text"), "text": data.get("text", ""), "client_message_id": data.get("client_message_id", ""), "reply_to_id": data.get("reply_to_id")}, [])
+        return {"message": group_message_payload(msg, self.scope["user"])}

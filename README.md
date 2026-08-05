@@ -102,3 +102,7 @@ Phase 4 adds stories, story media, reactions, replies, polls, highlights, reels,
 
 Phase 5 adds private conversations, message requests, authenticated WebSockets, attachments, voice-note metadata, presence, read/delivery receipts, offline queue helpers, synchronization endpoints, mobile chat screens, and restricted admin moderation for reported private content. See docs/phase-5-completion.md for endpoint, event, migration, test, security, and limitation details.
 
+
+## Phase 6 Group Chats and Notifications
+
+Phase 6 adds group chats, group roles, invitations, join requests, group message actions, in-app notifications, push-delivery queue records, mobile group/notification screens, and admin group moderation. See docs/phase-6-completion.md for endpoints, WebSocket events, migration details, test results, security notes, and known limitations.

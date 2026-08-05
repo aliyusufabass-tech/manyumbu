@@ -22,3 +22,4 @@ button:disabled { opacity: 0.65; cursor: wait; }
 .actions { display: flex; gap: 8px; }
 .actions button { padding: 10px 12px; }
 @media (max-width: 760px) { .toolbar, .row { grid-template-columns: 1fr; } .actions { flex-wrap: wrap; } }
+textarea { border: 1px solid #cbd8d2; border-radius: 8px; min-height: 96px; padding: 13px 14px; font: inherit; resize: vertical; } .toolbar h2 { display: inline-flex; align-items: center; gap: 8px; }

@@ -95,3 +95,11 @@ for model in [Conversation, ConversationParticipant, Message, MessageAttachment,
         admin.site.register(model)
     except admin.sites.AlreadyRegistered:
         pass
+
+from .models import AdminAnnouncement, Group, GroupArchive, GroupAuditLog, GroupBan, GroupClearState, GroupInvitation, GroupJoinRequest, GroupMember, GroupMessage, GroupMessageAttachment, GroupMessageDeletion, GroupMessageDeliveryReceipt, GroupMessagePin, GroupMessageReaction, GroupMessageReadReceipt, GroupMessageReport, GroupMessageStar, GroupMute, GroupReport, GroupRestriction, GroupRole, GroupSettings, NotificationBatch, NotificationDelivery, NotificationPreference, PushNotificationDelivery
+
+for model in [Group, GroupRole, GroupSettings, GroupMember, GroupInvitation, GroupJoinRequest, GroupBan, GroupRestriction, GroupMessage, GroupMessageAttachment, GroupMessageReaction, GroupMessageReadReceipt, GroupMessageDeliveryReceipt, GroupMessageDeletion, GroupMessageStar, GroupMessagePin, GroupMute, GroupArchive, GroupClearState, GroupReport, GroupMessageReport, GroupAuditLog, NotificationPreference, NotificationDelivery, PushNotificationDelivery, NotificationBatch, AdminAnnouncement]:
+    try:
+        admin.site.register(model)
+    except admin.sites.AlreadyRegistered:
+        pass
