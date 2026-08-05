@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import EmailVerificationCode, GoogleAccount, PasswordResetCode, User, UserProfile, UserSession
+from .models import BlockedUser, CloseFriend, EmailVerificationCode, Follow, FollowRequest, GoogleAccount, MutedUser, PasswordResetCode, RestrictedUser, User, UserPrivacySettings, UserProfile, UserSession
 
 
 @admin.register(User)
@@ -32,3 +32,12 @@ admin.site.register(UserSession)
 admin.site.register(EmailVerificationCode)
 admin.site.register(PasswordResetCode)
 admin.site.register(GoogleAccount)
+
+admin.site.register(UserPrivacySettings)
+admin.site.register(Follow)
+admin.site.register(FollowRequest)
+admin.site.register(BlockedUser)
+admin.site.register(RestrictedUser)
+admin.site.register(MutedUser)
+admin.site.register(CloseFriend)
+

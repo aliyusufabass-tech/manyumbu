@@ -84,3 +84,7 @@ Set `VITE_API_URL` when needed.
 ## Next Phase
 
 Phase 2 should begin only after Phase 1 tests and TypeScript checks pass. Phase 2 covers profiles and social relationships.
+
+## Phase 2 Profile and Relationships
+
+Phase 2 adds authenticated profile APIs, privacy controls, follow/follow-request workflows, blocking, restricting, muting, close friends, profile search, profile media upload/removal, and mobile screens for profile and relationship management. See `docs/phase-2-completion.md` for endpoint details, test results, known limitations, and manual verification commands.

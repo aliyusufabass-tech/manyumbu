@@ -182,3 +182,106 @@ def complete_password_reset(user, code: str, new_password: str):
     user.save(update_fields=["password", "updated_at"])
 
 
+
+# Phase 2 profile and relationship helpers
+from django.db import IntegrityError
+from .models import BlockedUser, CloseFriend, Follow, FollowRequest, MutedUser, RestrictedUser, UserPrivacySettings
+
+
+def ensure_profile_records(user):
+    UserProfile.objects.get_or_create(user=user)
+    UserPrivacySettings.objects.get_or_create(user=user)
+
+
+def users_blocked_between(a, b) -> bool:
+    return BlockedUser.objects.filter(blocker=a, blocked=b).exists() or BlockedUser.objects.filter(blocker=b, blocked=a).exists()
+
+
+def is_following(viewer, target) -> bool:
+    return bool(viewer and Follow.objects.filter(follower=viewer, following=target).exists())
+
+
+def can_view_profile(viewer, target) -> bool:
+    if viewer == target:
+        return True
+    if viewer and users_blocked_between(viewer, target):
+        return False
+    profile = getattr(target, "profile", None)
+    if not profile or not profile.is_private:
+        return True
+    return is_following(viewer, target)
+
+
+@transaction.atomic
+def follow_or_request(requester, target):
+    if requester == target:
+        raise ValueError("You cannot follow yourself.")
+    if users_blocked_between(requester, target):
+        raise PermissionError("This relationship is blocked.")
+    if Follow.objects.filter(follower=requester, following=target).exists():
+        return "already_following", None
+    ensure_profile_records(target)
+    if target.profile.is_private:
+        obj, created = FollowRequest.objects.get_or_create(requester=requester, target=target, status=FollowRequest.STATUS_PENDING)
+        return "requested", obj
+    obj, created = Follow.objects.get_or_create(follower=requester, following=target)
+    FollowRequest.objects.filter(requester=requester, target=target, status=FollowRequest.STATUS_PENDING).update(status=FollowRequest.STATUS_ACCEPTED, responded_at=timezone.now())
+    return "followed", obj
+
+
+@transaction.atomic
+def unfollow_user(follower, following):
+    deleted, _ = Follow.objects.filter(follower=follower, following=following).delete()
+    return deleted > 0
+
+
+@transaction.atomic
+def accept_follow_request(target, request_id):
+    request = FollowRequest.objects.select_for_update().get(id=request_id, target=target, status=FollowRequest.STATUS_PENDING)
+    if users_blocked_between(request.requester, target):
+        raise PermissionError("This relationship is blocked.")
+    Follow.objects.get_or_create(follower=request.requester, following=target)
+    request.status = FollowRequest.STATUS_ACCEPTED
+    request.responded_at = timezone.now()
+    request.save(update_fields=["status", "responded_at", "updated_at"])
+    return request
+
+
+@transaction.atomic
+def reject_follow_request(target, request_id):
+    request = FollowRequest.objects.select_for_update().get(id=request_id, target=target, status=FollowRequest.STATUS_PENDING)
+    request.status = FollowRequest.STATUS_REJECTED
+    request.responded_at = timezone.now()
+    request.save(update_fields=["status", "responded_at", "updated_at"])
+    return request
+
+
+@transaction.atomic
+def cancel_follow_request(requester, request_id):
+    request = FollowRequest.objects.select_for_update().get(id=request_id, requester=requester, status=FollowRequest.STATUS_PENDING)
+    request.status = FollowRequest.STATUS_CANCELED
+    request.responded_at = timezone.now()
+    request.save(update_fields=["status", "responded_at", "updated_at"])
+    return request
+
+
+@transaction.atomic
+def remove_follower(owner, follower):
+    deleted, _ = Follow.objects.filter(follower=follower, following=owner).delete()
+    return deleted > 0
+
+
+@transaction.atomic
+def block_user(blocker, blocked):
+    if blocker == blocked:
+        raise ValueError("You cannot block yourself.")
+    block, _ = BlockedUser.objects.get_or_create(blocker=blocker, blocked=blocked)
+    Follow.objects.filter(follower__in=[blocker, blocked], following__in=[blocker, blocked]).delete()
+    FollowRequest.objects.filter(requester__in=[blocker, blocked], target__in=[blocker, blocked], status=FollowRequest.STATUS_PENDING).update(status=FollowRequest.STATUS_CANCELED, responded_at=timezone.now())
+    CloseFriend.objects.filter(owner=blocker, friend=blocked).delete()
+    return block
+
+
+def unblock_user(blocker, blocked):
+    deleted, _ = BlockedUser.objects.filter(blocker=blocker, blocked=blocked).delete()
+    return deleted > 0

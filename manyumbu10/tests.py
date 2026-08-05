@@ -120,3 +120,167 @@ class PhaseOneAuthTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["data"]["requires_phone_number"])
+
+from .models import BlockedUser, CloseFriend, Follow, FollowRequest, MutedUser, RestrictedUser, UserPrivacySettings
+from .services import ensure_profile_records, issue_tokens
+
+
+class PhaseTwoProfileRelationshipTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        User = get_user_model()
+        self.alice = User.objects.create_user(
+            phone_number="+255700000001",
+            email="alice@example.com",
+            username="alice",
+            full_name="Alice Manyumbu",
+            date_of_birth="1998-01-01",
+            password="StrongerPass123!",
+            is_active=True,
+            is_email_verified=True,
+        )
+        self.bob = User.objects.create_user(
+            phone_number="+255700000002",
+            email="bob@example.com",
+            username="bob",
+            full_name="Bob River",
+            date_of_birth="1999-02-02",
+            password="StrongerPass123!",
+            is_active=True,
+            is_email_verified=True,
+        )
+        self.caro = User.objects.create_user(
+            phone_number="+255700000003",
+            email="caro@example.com",
+            username="caro",
+            full_name="Caro Hill",
+            date_of_birth="1997-03-03",
+            password="StrongerPass123!",
+            is_active=True,
+            is_email_verified=True,
+        )
+        for user in [self.alice, self.bob, self.caro]:
+            ensure_profile_records(user)
+        self.alice_token = issue_tokens(self.alice)["access"]
+        self.bob_token = issue_tokens(self.bob)["access"]
+        self.caro_token = issue_tokens(self.caro)["access"]
+
+    def auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def post_json_auth(self, url, payload=None, token=None):
+        return self.client.post(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+
+    def patch_json_auth(self, url, payload=None, token=None):
+        return self.client.patch(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+
+    def test_profile_retrieval_hides_public_phone_number(self):
+        response = self.client.get("/api/v1/profiles/bob/", **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 200, response.content)
+        profile = response.json()["data"]["profile"]
+        self.assertEqual(profile["username"], "bob")
+        self.assertNotIn("phone_number", profile)
+
+    def test_own_profile_includes_private_account_fields(self):
+        response = self.client.get("/api/v1/profiles/me/", **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 200)
+        profile = response.json()["data"]["profile"]
+        self.assertEqual(profile["phone_number"], "+255700000001")
+        self.assertIn("saved", profile["tabs"])
+
+    def test_profile_edit_and_unique_username_validation(self):
+        response = self.patch_json_auth("/api/v1/profiles/me/", {"bio": "Builder", "location": "Dar", "username": "alice_new"})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.alice.refresh_from_db()
+        self.assertEqual(self.alice.username, "alice_new")
+        response = self.patch_json_auth("/api/v1/profiles/me/", {"username": "bob"})
+        self.assertEqual(response.status_code, 409)
+
+    def test_public_account_follow_and_duplicate_prevention(self):
+        response = self.post_json_auth("/api/v1/profiles/bob/follow/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["data"]["state"], "followed")
+        response = self.post_json_auth("/api/v1/profiles/bob/follow/")
+        self.assertEqual(response.json()["data"]["state"], "already_following")
+        self.assertEqual(Follow.objects.filter(follower=self.alice, following=self.bob).count(), 1)
+
+    def test_self_follow_prevention(self):
+        response = self.post_json_auth("/api/v1/profiles/alice/follow/")
+        self.assertEqual(response.status_code, 400)
+
+    def test_private_account_follow_request_accept_reject_cancel(self):
+        self.bob.profile.is_private = True
+        self.bob.profile.save()
+        response = self.post_json_auth("/api/v1/profiles/bob/follow/")
+        self.assertEqual(response.json()["data"]["state"], "requested")
+        request_id = response.json()["data"]["request_id"]
+        response = self.post_json_auth(f"/api/v1/follow-requests/{request_id}/accept/", token=self.bob_token)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(Follow.objects.filter(follower=self.alice, following=self.bob).exists())
+
+        self.caro.profile.is_private = True
+        self.caro.profile.save()
+        response = self.post_json_auth("/api/v1/profiles/caro/follow/", token=self.bob_token)
+        self.assertEqual(response.status_code, 200)
+        request_id = response.json()["data"]["request_id"]
+        response = self.post_json_auth(f"/api/v1/follow-requests/{request_id}/cancel/", token=self.bob_token)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.post_json_auth("/api/v1/profiles/caro/follow/", token=self.bob_token)
+        request_id = response.json()["data"]["request_id"]
+        response = self.post_json_auth(f"/api/v1/follow-requests/{request_id}/reject/", token=self.caro_token)
+        self.assertEqual(response.status_code, 200)
+
+    def test_remove_follower_and_lists(self):
+        Follow.objects.create(follower=self.bob, following=self.alice)
+        response = self.client.get("/api/v1/relationships/followers/", **self.auth(self.alice_token))
+        self.assertEqual(response.json()["data"]["count"], 1)
+        response = self.client.delete("/api/v1/profiles/bob/remove-follower/", **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Follow.objects.filter(follower=self.bob, following=self.alice).exists())
+
+    def test_blocking_removes_follows_requests_and_hides_search(self):
+        Follow.objects.create(follower=self.alice, following=self.bob)
+        FollowRequest.objects.create(requester=self.bob, target=self.alice)
+        response = self.post_json_auth("/api/v1/relationships/blocked/bob/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(Follow.objects.filter(follower=self.alice, following=self.bob).exists())
+        self.assertFalse(FollowRequest.objects.filter(requester=self.bob, target=self.alice, status=FollowRequest.STATUS_PENDING).exists())
+        response = self.client.get("/api/v1/profiles/search/?q=bob", **self.auth(self.alice_token))
+        self.assertEqual(response.json()["data"]["count"], 0)
+        response = self.client.delete("/api/v1/relationships/blocked/bob/", **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 200)
+
+    def test_restrict_mute_and_close_friends(self):
+        self.assertEqual(self.post_json_auth("/api/v1/relationships/restricted/bob/").status_code, 200)
+        self.assertTrue(RestrictedUser.objects.filter(owner=self.alice, restricted=self.bob).exists())
+        self.assertEqual(self.post_json_auth("/api/v1/relationships/muted/bob/", {"mute_posts": True, "mute_stories": True}).status_code, 200)
+        mute = MutedUser.objects.get(owner=self.alice, muted=self.bob)
+        self.assertTrue(mute.mute_posts)
+        self.assertTrue(mute.mute_stories)
+        self.assertEqual(self.post_json_auth("/api/v1/relationships/close-friends/bob/").status_code, 200)
+        self.assertTrue(CloseFriend.objects.filter(owner=self.alice, friend=self.bob).exists())
+
+    def test_blocked_user_cannot_be_close_friend(self):
+        BlockedUser.objects.create(blocker=self.alice, blocked=self.bob)
+        response = self.post_json_auth("/api/v1/relationships/close-friends/bob/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_privacy_changes_phone_discoverability_and_private_profile(self):
+        response = self.client.get("/api/v1/profiles/search/?q=%2B255700000002", **self.auth(self.alice_token))
+        self.assertEqual(response.json()["data"]["count"], 0)
+        self.patch_json_auth("/api/v1/profiles/privacy/", {"phone_discoverable": True}, token=self.bob_token)
+        response = self.client.get("/api/v1/profiles/search/?q=%2B255700000002", **self.auth(self.alice_token))
+        self.assertEqual(response.json()["data"]["count"], 1)
+        self.patch_json_auth("/api/v1/profiles/me/", {"is_private": True, "bio": "secret"}, token=self.bob_token)
+        response = self.client.get("/api/v1/profiles/bob/", **self.auth(self.alice_token))
+        self.assertFalse(response.json()["data"]["profile"]["viewer_can_view_private_content"])
+        self.assertEqual(response.json()["data"]["profile"]["bio"], "")
+
+    def test_private_to_public_accepts_valid_pending_requests(self):
+        self.bob.profile.is_private = True
+        self.bob.profile.save()
+        self.post_json_auth("/api/v1/profiles/bob/follow/")
+        self.patch_json_auth("/api/v1/profiles/me/", {"is_private": False}, token=self.bob_token)
+        self.assertTrue(Follow.objects.filter(follower=self.alice, following=self.bob).exists())
+

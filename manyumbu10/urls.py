@@ -1,5 +1,20 @@
 from django.urls import path
 
+from .profile_views import (
+    BlockView,
+    CloseFriendsView,
+    FollowRequestActionView,
+    FollowView,
+    MeProfileView,
+    MutedView,
+    PrivacySettingsView,
+    ProfileMediaView,
+    PublicProfileView,
+    RelationshipListView,
+    RemoveFollowerView,
+    RestrictedView,
+    SearchProfilesView,
+)
 from .views import (
     ForgotPasswordView,
     GoogleAuthStartView,
@@ -20,4 +35,22 @@ urlpatterns = [
     path("auth/forgot-password/", ForgotPasswordView.as_view(), name="auth-forgot-password"),
     path("auth/reset-password/", ResetPasswordView.as_view(), name="auth-reset-password"),
     path("auth/google/start/", GoogleAuthStartView.as_view(), name="auth-google-start"),
+    path("profiles/me/", MeProfileView.as_view(), name="profile-me"),
+    path("profiles/me/media/", ProfileMediaView.as_view(), name="profile-media"),
+    path("profiles/search/", SearchProfilesView.as_view(), name="profile-search"),
+    path("profiles/privacy/", PrivacySettingsView.as_view(), name="profile-privacy"),
+    path("profiles/<str:username>/", PublicProfileView.as_view(), name="profile-public"),
+    path("profiles/<str:username>/follow/", FollowView.as_view(), name="profile-follow"),
+    path("profiles/<str:username>/remove-follower/", RemoveFollowerView.as_view(), name="profile-remove-follower"),
+    path("follow-requests/<int:request_id>/<str:action>/", FollowRequestActionView.as_view(), name="follow-request-action"),
+    path("relationships/blocked/", BlockView.as_view(), name="blocked-list"),
+    path("relationships/blocked/<str:username>/", BlockView.as_view(), name="blocked-action"),
+    path("relationships/restricted/", RestrictedView.as_view(), name="restricted-list"),
+    path("relationships/restricted/<str:username>/", RestrictedView.as_view(), name="restricted-action"),
+    path("relationships/muted/", MutedView.as_view(), name="muted-list"),
+    path("relationships/muted/<str:username>/", MutedView.as_view(), name="muted-action"),
+    path("relationships/close-friends/", CloseFriendsView.as_view(), name="close-friends-list"),
+    path("relationships/close-friends/<str:username>/", CloseFriendsView.as_view(), name="close-friends-action"),
+    path("relationships/<str:list_name>/", RelationshipListView.as_view(), name="relationship-list"),
 ]
+
