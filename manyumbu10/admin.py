@@ -103,3 +103,11 @@ for model in [Group, GroupRole, GroupSettings, GroupMember, GroupInvitation, Gro
         admin.site.register(model)
     except admin.sites.AlreadyRegistered:
         pass
+
+from .models import AppealAttachment, AppealDecision, AudienceInsight, BusinessContactAction, BusinessProfile, Call, CallDeviceSession, CallHistory, CallModerationAction, CallParticipant, CallReport, CallSignalEvent, ContentInsight, CreatorProfile, ModerationAction, ModerationAppeal, ModerationEvidenceAccess, ProfessionalAccount, ProfessionalInsightDaily, UserFeatureRestriction, VerificationDocument, VerificationRequest
+
+for model in [Call, CallParticipant, CallDeviceSession, CallSignalEvent, CallHistory, CallReport, CallModerationAction, ModerationAction, UserFeatureRestriction, ModerationAppeal, AppealAttachment, AppealDecision, ModerationEvidenceAccess, ProfessionalAccount, CreatorProfile, BusinessProfile, VerificationRequest, VerificationDocument, ProfessionalInsightDaily, ContentInsight, AudienceInsight, BusinessContactAction]:
+    try:
+        admin.site.register(model)
+    except admin.sites.AlreadyRegistered:
+        pass

@@ -4,7 +4,7 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
 from .messaging_services import create_message, delivery_ack, mark_read, message_payload, presence_payload, update_presence
-from .models import Conversation, ConversationParticipant, Message, UserPresence, WebSocketSession
+from .models import Call, CallDeviceSession, CallParticipant, Conversation, ConversationParticipant, Message, UserPresence, WebSocketSession
 
 
 class EnvelopeConsumer(AsyncJsonWebsocketConsumer):
@@ -186,3 +186,74 @@ class GroupConsumer(EnvelopeConsumer):
         from .group_services import create_group_message, group_message_payload
         msg, _ = create_group_message(Group.objects.get(id=self.group_id), self.scope["user"], {"message_type": data.get("message_type", "text"), "text": data.get("text", ""), "client_message_id": data.get("client_message_id", ""), "reply_to_id": data.get("reply_to_id")}, [])
         return {"message": group_message_payload(msg, self.scope["user"])}
+class CallSignalingConsumer(EnvelopeConsumer):
+    async def connect(self):
+        if await self.reject_anonymous(): return
+        self.call_id = self.scope["url_route"]["kwargs"]["call_id"]
+        if not await self.is_participant(): await self.close(code=4403); return
+        self.group_name = f"call.{self.call_id}"
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+        await self.record_device_session(True)
+        await self.send_event("connection.ready", {"call_id": str(self.call_id)})
+
+    async def disconnect(self, code):
+        if hasattr(self, "group_name"): await self.channel_layer.group_discard(self.group_name, self.channel_name)
+        await self.record_device_session(False)
+
+    async def receive_json(self, content, **kwargs):
+        event = content.get("event"); request_id = content.get("request_id"); data = content.get("data", {}) or {}
+        try:
+            if event in {"call.offer", "call.answer", "call.ice_candidate", "call.mute_updated", "call.camera_updated", "call.ring"}:
+                payload = await self.record_signal(event, data, request_id)
+                await self.channel_layer.group_send(self.group_name, {"type": "relay.event", "payload": {"event": event, "version": self.event_version, "call_id": str(self.call_id), "data": payload, "request_id": request_id}})
+            elif event in {"call.accept", "call.decline", "call.cancel", "call.end", "call.join", "call.leave"}:
+                action = event.split(".")[1]
+                payload = await self.transition(action, data)
+                server_event = {"accept": "call.accepted", "decline": "call.declined", "cancel": "call.cancelled", "end": "call.ended", "join": "call.participant_joined", "leave": "call.participant_left"}[action]
+                await self.channel_layer.group_send(self.group_name, {"type": "relay.event", "payload": {"event": server_event, "version": self.event_version, "call_id": str(self.call_id), "data": payload, "request_id": request_id}})
+            elif event == "call.heartbeat":
+                payload = await self.heartbeat(data)
+                await self.send_event("call.state_updated", payload, request_id)
+            else:
+                await self.send_event("error", {"message": "Unknown call event.", "call_id": str(self.call_id)}, request_id)
+        except Exception as exc:
+            await self.send_event("error", {"message": str(exc), "call_id": str(self.call_id)}, request_id)
+
+    @database_sync_to_async
+    def is_participant(self):
+        from .phase7_services import require_call_participant
+        try:
+            require_call_participant(Call.objects.get(id=self.call_id), self.scope["user"])
+            return True
+        except Exception:
+            return False
+
+    @database_sync_to_async
+    def record_device_session(self, connected):
+        from django.utils import timezone
+        participant = CallParticipant.objects.filter(call_id=self.call_id, user=self.scope["user"]).first()
+        if not participant: return
+        device_id = self.scope.get("query_string", b"").decode()[:120] or "websocket"
+        if connected:
+            CallDeviceSession.objects.update_or_create(call_id=self.call_id, participant=participant, device_id=device_id, defaults={"channel_name": self.channel_name, "accepted_at": timezone.now(), "disconnected_at": None})
+        else:
+            CallDeviceSession.objects.filter(call_id=self.call_id, participant=participant, channel_name=self.channel_name, disconnected_at__isnull=True).update(disconnected_at=timezone.now())
+
+    @database_sync_to_async
+    def record_signal(self, event, data, request_id):
+        from .phase7_services import record_signal
+        return record_signal(Call.objects.get(id=self.call_id), self.scope["user"], event, data, request_id)
+
+    @database_sync_to_async
+    def transition(self, action, data):
+        from .phase7_services import call_payload, call_transition
+        call = call_transition(Call.objects.get(id=self.call_id), self.scope["user"], action, data)
+        return {"call": call_payload(call, self.scope["user"]), "username": self.scope["user"].username}
+
+    @database_sync_to_async
+    def heartbeat(self, data):
+        from django.utils import timezone
+        participant = CallParticipant.objects.get(call_id=self.call_id, user=self.scope["user"])
+        participant.last_heartbeat_at = timezone.now(); participant.connection_quality = data.get("connection_quality", participant.connection_quality); participant.save(update_fields=["last_heartbeat_at", "connection_quality", "updated_at"])
+        return {"call_id": str(self.call_id), "username": self.scope["user"].username, "state": "connected"}

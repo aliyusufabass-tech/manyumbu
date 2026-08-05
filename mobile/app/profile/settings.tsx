@@ -9,7 +9,7 @@ export default function AccountSettingsScreen() {
       <Link href="/relationships/blocked"><Text style={{ color: "#126C57", fontWeight: "800" }}>Blocked users</Text></Link>
       <Link href="/relationships/restricted"><Text style={{ color: "#126C57", fontWeight: "800" }}>Restricted users</Text></Link>
       <Link href="/relationships/muted"><Text style={{ color: "#126C57", fontWeight: "800" }}>Muted users</Text></Link>
-      <Link href="/relationships/close-friends"><Text style={{ color: "#126C57", fontWeight: "800" }}>Close friends</Text></Link>
+      <Link href="/relationships/close-friends"><Text style={{ color: "#126C57", fontWeight: "800" }}>Close friends</Text></Link>`r`n      <Link href="/calls"><Text style={{ color: "#126C57", fontWeight: "800" }}>Call history</Text></Link>`r`n      <Link href="/professional"><Text style={{ color: "#126C57", fontWeight: "800" }}>Professional account</Text></Link>`r`n      <Link href="/moderation/appeals"><Text style={{ color: "#126C57", fontWeight: "800" }}>Moderation and appeals</Text></Link>
     </View>
   );
 }

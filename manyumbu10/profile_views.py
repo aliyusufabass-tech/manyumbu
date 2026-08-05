@@ -186,7 +186,7 @@ class PrivacySettingsView(AuthenticatedView):
     def patch(self, request):
         payload = body(request)
         settings = request.user_obj.privacy_settings
-        for field in ["show_in_suggestions", "phone_discoverable", "dob_visibility", "profile_details_public", "online_status_visible", "who_can_message_me", "who_can_add_to_conversations", "show_online_status", "show_last_seen", "send_read_receipts", "show_typing_indicator", "show_recording_indicator", "allow_message_requests", "allow_forwarded_messages_from_unknown_users"]:
+        for field in ["show_in_suggestions", "phone_discoverable", "dob_visibility", "profile_details_public", "online_status_visible", "who_can_message_me", "who_can_add_to_conversations", "show_online_status", "show_last_seen", "send_read_receipts", "show_typing_indicator", "show_recording_indicator", "allow_message_requests", "allow_forwarded_messages_from_unknown_users", "who_can_call_me", "allow_voice_calls", "allow_video_calls", "show_call_notifications", "silence_calls_from_unknown_users"]:
             if field in payload:
                 setattr(settings, field, payload[field])
         settings.full_clean()
@@ -210,7 +210,11 @@ def privacy_payload(settings):
         "show_recording_indicator": settings.show_recording_indicator,
         "allow_message_requests": settings.allow_message_requests,
         "allow_forwarded_messages_from_unknown_users": settings.allow_forwarded_messages_from_unknown_users,
-    }
+        "who_can_call_me": getattr(settings, "who_can_call_me", "everyone"),
+        "allow_voice_calls": getattr(settings, "allow_voice_calls", True),
+        "allow_video_calls": getattr(settings, "allow_video_calls", True),
+        "show_call_notifications": getattr(settings, "show_call_notifications", True),
+        "silence_calls_from_unknown_users": getattr(settings, "silence_calls_from_unknown_users", False),    }
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -426,6 +430,3 @@ class ProfileMediaView(AuthenticatedView):
         else:
             return response(False, "Unknown profile media type.", status=400)
         return response(True, "Profile media removed successfully.", {"profile": profile_payload(request.user_obj, request.user_obj, include_private=True)})
-
-
-

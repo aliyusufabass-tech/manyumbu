@@ -261,7 +261,7 @@ class NotificationPreferenceView(AuthenticatedView):
         pref.security_alerts = True; pref.save(); return response(True, "Notification preferences updated.", {"preferences": preference_payload(pref)})
 
 def preference_payload(pref):
-    return {field: getattr(pref, field) for field in ["private_messages", "message_requests", "group_messages", "group_mentions", "group_role_changes", "followers", "likes", "comments", "story_reactions", "reel_activity", "security_alerts", "marketing", "push_enabled", "email_enabled", "in_app_enabled", "notification_previews", "sound", "vibration"]}
+    return {field: getattr(pref, field) for field in ["private_messages", "message_requests", "group_messages", "group_mentions", "group_role_changes", "incoming_calls", "missed_calls", "declined_calls", "group_calls", "followers", "likes", "comments", "story_reactions", "reel_activity", "security_alerts", "marketing", "push_enabled", "email_enabled", "in_app_enabled", "notification_previews", "sound", "vibration"]}
 
 
 @method_decorator(csrf_exempt, name="dispatch")

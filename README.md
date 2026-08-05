@@ -106,3 +106,7 @@ Phase 5 adds private conversations, message requests, authenticated WebSockets, 
 ## Phase 6 Group Chats and Notifications
 
 Phase 6 adds group chats, group roles, invitations, join requests, group message actions, in-app notifications, push-delivery queue records, mobile group/notification screens, and admin group moderation. See docs/phase-6-completion.md for endpoints, WebSocket events, migration details, test results, security notes, and known limitations.
+
+## Phase 7 Calls, Advanced Moderation, and Professional Accounts
+
+Phase 7 adds voice/video call records, authenticated call signaling WebSockets, call history, call reporting, call privacy, feature restrictions, appeals, creator and business accounts, verification requests, professional insights, mobile call/professional screens, and admin review tools. See docs/phase-7-completion.md for endpoints, migration details, WebRTC configuration, test results, and known limitations.

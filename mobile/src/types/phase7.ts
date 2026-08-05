@@ -1,0 +1,20 @@
+import type { CompactUser, CursorPage } from "./messaging";
+import type { Paginated } from "./profile";
+
+export type CallType = "private_voice" | "private_video" | "group_voice" | "group_video";
+export type CallStatus = "initiating" | "ringing" | "connecting" | "active" | "reconnecting" | "declined" | "missed" | "busy" | "failed" | "ended" | "cancelled";
+export type CallParticipant = { user: CompactUser; role: "host" | "invitee" | "member"; join_status: string; joined_at: string | null; left_at: string | null; device_identifier: string; is_muted: boolean; camera_enabled: boolean; screen_share_enabled: boolean; connection_quality: Record<string, unknown> };
+export type Call = { id: string; call_type: CallType; conversation_id: string | null; group_id: string | null; group_name: string; peer: CompactUser | null; initiator: CompactUser; status: CallStatus; participants: CallParticipant[]; started_at: string | null; answered_at: string | null; ended_at: string | null; duration_seconds: number; failure_reason: string; provider: string; signaling: CallConfig; created_at: string; updated_at: string };
+export type CallConfig = { media_transport: "webrtc"; stun_servers: string[]; turn_configured: boolean; provider_fallback: string; native_webrtc_required: boolean; expo_go_supported: boolean };
+export type ModerationAction = { id: string; target_user: CompactUser; action_type: string; status: string; reason: string; object_type: string; object_id: string; appeal_eligible: boolean; expires_at: string | null; created_at: string };
+export type FeatureRestriction = { id: number; feature: string; reason: string; starts_at: string; expires_at: string | null; status: string; appeal_eligible: boolean };
+export type ModerationAppeal = { id: string; action: ModerationAction; explanation: string; status: string; created_at: string; decision?: { decision: string; notes: string } | null };
+export type ProfessionalAccount = { account_type: "creator" | "business"; status: string; category: string; public_contact_enabled: boolean; creator?: Record<string, unknown>; business?: Record<string, unknown>; created_at: string; updated_at: string };
+export type ProfessionalInsights = Record<string, unknown> & { definitions: Record<string, string> };
+export type VerificationRequest = { id: string; account_type: "creator" | "business"; public_name: string; category: string; reason: string; supporting_links: string[]; status: string; created_at: string; updated_at: string };
+export type CallPage = Paginated<Call>;
+export type ActionPage = Paginated<ModerationAction>;
+export type AppealPage = Paginated<ModerationAppeal>;
+export type RestrictionPage = Paginated<FeatureRestriction>;
+export type VerificationPage = Paginated<VerificationRequest>;
+export type CallEvent = { event: string; version: number; call_id?: string; data: Record<string, unknown>; request_id?: string };

@@ -114,3 +114,10 @@ else:
 
 MANYUMBU_ALLOWED_WS_ORIGINS = [origin for origin in os.getenv("MANYUMBU_ALLOWED_WS_ORIGINS", "").split(",") if origin]
 
+
+MANYUMBU_STUN_SERVERS = [server.strip() for server in os.getenv("MANYUMBU_STUN_SERVERS", "stun:stun.l.google.com:19302").split(",") if server.strip()]
+MANYUMBU_TURN_SERVER = os.getenv("MANYUMBU_TURN_SERVER", "")
+MANYUMBU_TURN_USERNAME = os.getenv("MANYUMBU_TURN_USERNAME", "")
+MANYUMBU_TURN_PASSWORD = os.getenv("MANYUMBU_TURN_PASSWORD", "")
+MANYUMBU_CALL_PROVIDER = os.getenv("MANYUMBU_CALL_PROVIDER", "none")
+MANYUMBU_CALL_TIMEOUT_SECONDS = int(os.getenv("MANYUMBU_CALL_TIMEOUT_SECONDS", "45"))

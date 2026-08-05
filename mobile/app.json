@@ -7,7 +7,15 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "android": {
-      "package": "com.manyumbu.app"
+      "package": "com.manyumbu.app",
+      "permissions": ["CAMERA", "RECORD_AUDIO", "BLUETOOTH", "BLUETOOTH_CONNECT", "POST_NOTIFICATIONS", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MICROPHONE", "FOREGROUND_SERVICE_CAMERA"]
+    },
+    "ios": {
+      "infoPlist": {
+        "NSCameraUsageDescription": "Manyumbu uses the camera for video calls when you choose to enable it.",
+        "NSMicrophoneUsageDescription": "Manyumbu uses the microphone for voice and video calls.",
+        "UIBackgroundModes": ["audio", "voip"]
+      }
     },
     "plugins": ["expo-router", "expo-secure-store"]
   }

@@ -1,0 +1,11 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { router } from "expo-router";
+import { Pressable, Text, View } from "react-native";
+import { getProfessionalAccount, getProfessionalInsights } from "../../src/api/phase7";
+
+export default function ProfessionalDashboardScreen() {
+  const account = useQuery({ queryKey: ["professional-account"], queryFn: getProfessionalAccount });
+  const insights = useQuery({ queryKey: ["professional-insights"], queryFn: getProfessionalInsights, enabled: Boolean(account.data?.data.professional_account) });
+  const item = account.data?.data.professional_account;
+  return <View style={{ flex: 1, backgroundColor: "#FFFFFF", paddingTop: 48, paddingHorizontal: 18 }}><Text style={{ fontSize: 28, fontWeight: "900" }}>Professional</Text>{item ? <><Text style={{ color: "#4B5563", marginTop: 8 }}>{item.account_type} · {item.status} · {item.category}</Text><View style={{ flexDirection: "row", gap: 14, marginVertical: 16 }}><Pressable onPress={() => router.push("/professional/verification")}><Text style={{ color: "#126C57", fontWeight: "900" }}>Verification</Text></Pressable><Pressable onPress={() => router.push("/moderation/appeals")}><Text style={{ color: "#126C57", fontWeight: "900" }}>Appeals</Text></Pressable></View><Text style={{ fontWeight: "900", marginBottom: 8 }}>Insights</Text>{Object.entries(insights.data?.data.insights ?? {}).filter(([key]) => key !== "definitions").map(([key, value]) => <Text key={key} style={{ paddingVertical: 4 }}>{key.replace(/_/g, " ")}: {String(value)}</Text>)}<Text style={{ color: "#6B7280", marginTop: 12 }}>Insights may be delayed or approximate.</Text></> : <><Text style={{ color: "#6B7280", marginTop: 8 }}>Choose a professional account type.</Text><Pressable onPress={() => router.push("/professional/creator")} style={{ backgroundColor: "#126C57", padding: 14, borderRadius: 8, marginTop: 16 }}><Text style={{ color: "white", fontWeight: "900" }}>Creator account</Text></Pressable><Pressable onPress={() => router.push("/professional/business")} style={{ backgroundColor: "#126C57", padding: 14, borderRadius: 8, marginTop: 10 }}><Text style={{ color: "white", fontWeight: "900" }}>Business account</Text></Pressable></>}</View>;
+}

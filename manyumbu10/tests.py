@@ -998,3 +998,147 @@ class PhaseSixGroupWebSocketTests(TransactionTestCase):
         async_to_sync(self.group_flow)()
         self.assertTrue(GroupMessage.objects.filter(group=self.group, text="hello group ws").exists())
         async_to_sync(self.non_member_flow)()
+
+from .models import Call, CallParticipant, CallReport, CallSignalEvent, ModerationAction, ModerationAppeal, ProfessionalAccount, UserFeatureRestriction, VerificationRequest
+from .messaging_services import get_or_create_private_conversation
+
+
+class PhaseSevenCallsProfessionalModerationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        User = get_user_model()
+        self.alice = User.objects.create_user("+255788000001", "ca@example.com", "callalice", "Call Alice", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.bob = User.objects.create_user("+255788000002", "cb@example.com", "callbob", "Call Bob", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.caro = User.objects.create_user("+255788000003", "cc@example.com", "callcaro", "Call Caro", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.admin = User.objects.create_user("+255788000004", "cd@example.com", "calladmin", "Call Admin", "StrongerPass123!", date_of_birth="1990-01-01", is_active=True, is_email_verified=True, is_staff=True)
+        for user in [self.alice, self.bob, self.caro, self.admin]: ensure_profile_records(user)
+        self.alice_token = issue_tokens(self.alice)["access"]
+        self.bob_token = issue_tokens(self.bob)["access"]
+        self.caro_token = issue_tokens(self.caro)["access"]
+        self.admin_token = issue_tokens(self.admin)["access"]
+        self.conversation, _, _ = get_or_create_private_conversation(self.alice, self.bob)
+
+    def auth(self, token): return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+    def post_json(self, url, payload=None, token=None): return self.client.post(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+    def patch_json(self, url, payload=None, token=None): return self.client.patch(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+
+    def test_private_voice_and_video_call_lifecycle_history_and_report(self):
+        created = self.post_json("/api/v1/calls/", {"call_type": Call.TYPE_PRIVATE_VOICE, "conversation_id": str(self.conversation.id)})
+        self.assertEqual(created.status_code, 201, created.content)
+        call_id = created.json()["data"]["call"]["id"]
+        accepted = self.post_json(f"/api/v1/calls/{call_id}/accept/", {"device_id": "bob-phone", "camera_enabled": False}, token=self.bob_token)
+        self.assertEqual(accepted.status_code, 200, accepted.content)
+        self.assertEqual(accepted.json()["data"]["call"]["status"], Call.STATUS_ACTIVE)
+        report = self.post_json(f"/api/v1/calls/{call_id}/report/", {"reason": "harassment", "details": "bad call"}, token=self.bob_token)
+        self.assertEqual(report.status_code, 200, report.content)
+        self.assertTrue(CallReport.objects.filter(call_id=call_id, reporter=self.bob).exists())
+        ended = self.post_json(f"/api/v1/calls/{call_id}/end/", {"for_all": True})
+        self.assertEqual(ended.status_code, 200, ended.content)
+        self.assertEqual(ended.json()["data"]["call"]["status"], Call.STATUS_ENDED)
+        history = self.client.get("/api/v1/calls/", **self.auth(self.alice_token))
+        self.assertEqual(history.status_code, 200)
+        self.assertGreaterEqual(history.json()["data"]["count"], 1)
+        self.assertEqual(self.client.delete(f"/api/v1/calls/{call_id}/history/", **self.auth(self.alice_token)).status_code, 200)
+
+    def test_call_privacy_blocked_busy_timeout_and_restriction(self):
+        self.bob.privacy_settings.who_can_call_me = "no_one"; self.bob.privacy_settings.save()
+        denied = self.post_json("/api/v1/calls/", {"call_type": Call.TYPE_PRIVATE_VIDEO, "conversation_id": str(self.conversation.id)})
+        self.assertEqual(denied.status_code, 403)
+        self.bob.privacy_settings.who_can_call_me = "everyone"; self.bob.privacy_settings.save()
+        first = self.post_json("/api/v1/calls/", {"call_type": Call.TYPE_PRIVATE_VIDEO, "conversation_id": str(self.conversation.id)})
+        self.assertEqual(first.status_code, 201, first.content)
+        busy = self.post_json("/api/v1/calls/", {"call_type": Call.TYPE_PRIVATE_VOICE, "conversation_id": str(self.conversation.id)}, token=self.bob_token)
+        self.assertEqual(busy.status_code, 403)
+        call_id = first.json()["data"]["call"]["id"]
+        timeout = self.post_json(f"/api/v1/calls/{call_id}/timeout/")
+        self.assertEqual(timeout.status_code, 200)
+        self.assertEqual(timeout.json()["data"]["call"]["status"], Call.STATUS_MISSED)
+        restriction = self.post_json("/api/v1/admin/users/callalice/restrictions/", {"feature": UserFeatureRestriction.FEATURE_START_CALL, "reason": "spam"}, token=self.admin_token)
+        self.assertEqual(restriction.status_code, 201, restriction.content)
+        blocked = self.post_json("/api/v1/calls/", {"call_type": Call.TYPE_PRIVATE_VOICE, "conversation_id": str(self.conversation.id)})
+        self.assertEqual(blocked.status_code, 403)
+
+    def test_group_call_permissions_and_notifications(self):
+        group_response = self.post_json("/api/v1/groups/", {"name": "Call Group", "members": ["callbob"]})
+        self.assertEqual(group_response.status_code, 201, group_response.content)
+        group_id = group_response.json()["data"]["group"]["id"]
+        denied = self.post_json("/api/v1/calls/", {"call_type": Call.TYPE_GROUP_VOICE, "group_id": group_id}, token=self.bob_token)
+        self.assertEqual(denied.status_code, 403)
+        call = self.post_json("/api/v1/calls/", {"call_type": Call.TYPE_GROUP_VIDEO, "group_id": group_id})
+        self.assertEqual(call.status_code, 201, call.content)
+        call_id = call.json()["data"]["call"]["id"]
+        self.assertTrue(CallParticipant.objects.filter(call_id=call_id, user=self.bob, join_status=CallParticipant.STATUS_RINGING).exists())
+        self.assertTrue(self.bob.notifications.filter(notification_type="group_call_started").exists())
+        joined = self.post_json(f"/api/v1/calls/{call_id}/join/", token=self.bob_token)
+        self.assertEqual(joined.status_code, 200, joined.content)
+
+    def test_professional_creator_business_verification_appeal_and_admin_queue(self):
+        creator = self.post_json("/api/v1/professional-account/creator/", {"creator_category": "Travel", "professional_bio": "Stories and reels"})
+        self.assertEqual(creator.status_code, 201, creator.content)
+        self.alice.refresh_from_db()
+        self.assertTrue(self.alice.is_creator)
+        insights = self.client.get("/api/v1/professional-account/insights/", **self.auth(self.alice_token))
+        self.assertEqual(insights.status_code, 200)
+        business = self.post_json("/api/v1/professional-account/business/", {"business_name": "Manyumbu Tours", "business_category": "Travel", "show_phone_number": False}, token=self.bob_token)
+        self.assertEqual(business.status_code, 201, business.content)
+        verification = self.post_json("/api/v1/verification-requests/", {"account_type": "creator", "public_name": "Call Alice", "category": "Travel", "reason": "Known local creator", "supporting_links": ["https://example.com"]})
+        self.assertEqual(verification.status_code, 201, verification.content)
+        verification_id = verification.json()["data"]["verification_request"]["id"]
+        approve = self.post_json(f"/api/v1/admin/verification-requests/{verification_id}/approve/", {"notes": "looks ok"}, token=self.admin_token)
+        self.assertEqual(approve.status_code, 200, approve.content)
+        self.alice.refresh_from_db(); self.assertTrue(self.alice.is_verified)
+        restriction = self.post_json("/api/v1/admin/users/callbob/restrictions/", {"feature": UserFeatureRestriction.FEATURE_PROFESSIONAL, "reason": "policy"}, token=self.admin_token)
+        action_id = restriction.json()["data"]["moderation_action"]["id"]
+        appeal = self.post_json(f"/api/v1/moderation/actions/{action_id}/appeal/", {"explanation": "Please review"}, token=self.bob_token)
+        self.assertEqual(appeal.status_code, 201, appeal.content)
+        duplicate = self.post_json(f"/api/v1/moderation/actions/{action_id}/appeal/", {"explanation": "Again"}, token=self.bob_token)
+        self.assertEqual(duplicate.status_code, 400)
+        appeal_id = appeal.json()["data"]["appeal"]["id"]
+        decision = self.post_json(f"/api/v1/admin/appeals/{appeal_id}/approved/", {"notes": "approved"}, token=self.admin_token)
+        self.assertEqual(decision.status_code, 200, decision.content)
+        queue = self.client.get("/api/v1/admin/moderation/queue/", **self.auth(self.admin_token))
+        self.assertEqual(queue.status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/admin/moderation/queue/", **self.auth(self.bob_token)).status_code, 403)
+
+
+class PhaseSevenCallSignalingTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        User = get_user_model()
+        self.alice = User.objects.create_user("+255799000001", "sga@example.com", "signalalice", "Signal Alice", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.bob = User.objects.create_user("+255799000002", "sgb@example.com", "signalbob", "Signal Bob", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.stranger = User.objects.create_user("+255799000003", "sgc@example.com", "signalstranger", "Signal Stranger", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        for user in [self.alice, self.bob, self.stranger]: ensure_profile_records(user)
+        self.alice_token = issue_tokens(self.alice)["access"]
+        self.bob_token = issue_tokens(self.bob)["access"]
+        self.stranger_token = issue_tokens(self.stranger)["access"]
+        self.conversation, _, _ = get_or_create_private_conversation(self.alice, self.bob)
+        self.call = Call.objects.create(call_type=Call.TYPE_PRIVATE_VIDEO, conversation=self.conversation, initiator=self.alice, status=Call.STATUS_RINGING, started_at=timezone.now())
+        CallParticipant.objects.create(call=self.call, user=self.alice, role=CallParticipant.ROLE_HOST, join_status=CallParticipant.STATUS_JOINED, joined_at=timezone.now())
+        CallParticipant.objects.create(call=self.call, user=self.bob, role=CallParticipant.ROLE_INVITEE, join_status=CallParticipant.STATUS_RINGING)
+
+    async def signaling_flow(self):
+        communicator = WebsocketCommunicator(application, f"/ws/calls/{self.call.id}/?token={self.alice_token}&device=web")
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        ready = await communicator.receive_json_from()
+        self.assertEqual(ready["event"], "connection.ready")
+        await communicator.send_json_to({"event": "call.offer", "request_id": "offer1", "data": {"sdp": "offer", "token": "drop-me"}})
+        offer = await communicator.receive_json_from()
+        self.assertEqual(offer["event"], "call.offer")
+        self.assertNotIn("token", offer["data"]["payload"])
+        await communicator.send_json_to({"event": "call.heartbeat", "request_id": "hb", "data": {"connection_quality": {"rtt": 30}}})
+        heartbeat = await communicator.receive_json_from()
+        self.assertEqual(heartbeat["event"], "call.state_updated")
+        await communicator.disconnect()
+
+    async def nonparticipant_flow(self):
+        communicator = WebsocketCommunicator(application, f"/ws/calls/{self.call.id}/?token={self.stranger_token}")
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+
+    def test_call_signaling_auth_forwarding_and_rejection(self):
+        async_to_sync(self.signaling_flow)()
+        self.assertTrue(CallSignalEvent.objects.filter(call=self.call, event_name="call.offer").exists())
+        async_to_sync(self.nonparticipant_flow)()

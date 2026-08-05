@@ -1,0 +1,14 @@
+import axios from "axios";
+
+const api = axios.create({ baseURL: import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000/api/v1", headers: { "Content-Type": "application/json" } });
+export type QueueItem = { kind: string; id: string | number; reason: string; status: string; reporter: { username: string; full_name: string }; object_id: string; created_at: string };
+export type AdminPage<T> = { success: boolean; message: string; data: { results: T[]; count: number; next_offset?: number | null } };
+export async function fetchModerationQueue(token: string) { const { data } = await api.get<{ success: boolean; message: string; data: { results: QueueItem[]; count: number } }>("/admin/moderation/queue/", { headers: { Authorization: `Bearer ${token}` } }); return data; }
+export async function fetchCallReports(token: string) { const { data } = await api.get<AdminPage<Record<string, unknown>>>("/admin/call-reports/", { headers: { Authorization: `Bearer ${token}` } }); return data; }
+export async function fetchAppeals(token: string) { const { data } = await api.get<AdminPage<Record<string, unknown>>>("/admin/appeals/", { headers: { Authorization: `Bearer ${token}` } }); return data; }
+export async function decideAppeal(token: string, id: string, action: "approved" | "partially_approved" | "rejected", notes: string) { const { data } = await api.post(`/admin/appeals/${id}/${action}/`, { notes }, { headers: { Authorization: `Bearer ${token}` } }); return data; }
+export async function fetchVerificationRequests(token: string) { const { data } = await api.get<AdminPage<Record<string, unknown>>>("/admin/verification-requests/", { headers: { Authorization: `Bearer ${token}` } }); return data; }
+export async function decideVerification(token: string, id: string, action: "approve" | "reject", notes: string) { const { data } = await api.post(`/admin/verification-requests/${id}/${action}/`, { notes }, { headers: { Authorization: `Bearer ${token}` } }); return data; }
+export async function fetchProfessionalAccounts(token: string) { const { data } = await api.get<AdminPage<Record<string, unknown>>>("/admin/professional-accounts/", { headers: { Authorization: `Bearer ${token}` } }); return data; }
+export async function createUserRestriction(token: string, username: string, feature: string, reason: string, hours?: number) { const { data } = await api.post(`/admin/users/${username}/restrictions/`, { feature, reason, hours }, { headers: { Authorization: `Bearer ${token}` } }); return data; }
+export async function professionalAction(token: string, username: string, action: "remove-creator" | "remove-business" | "remove-verification") { const { data } = await api.post(`/admin/professional-accounts/${username}/${action}/`, {}, { headers: { Authorization: `Bearer ${token}` } }); return data; }

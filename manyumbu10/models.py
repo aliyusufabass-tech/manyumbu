@@ -210,6 +210,11 @@ class UserPrivacySettings(models.Model):
     show_recording_indicator = models.BooleanField(default=True)
     allow_message_requests = models.BooleanField(default=True)
     allow_forwarded_messages_from_unknown_users = models.BooleanField(default=False)
+    who_can_call_me = models.CharField(max_length=40, default="everyone")
+    allow_voice_calls = models.BooleanField(default=True)
+    allow_video_calls = models.BooleanField(default=True)
+    show_call_notifications = models.BooleanField(default=True)
+    silence_calls_from_unknown_users = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1239,6 +1244,12 @@ class GroupSettings(models.Model):
     mention_everyone_rate_limit_per_day = models.PositiveIntegerField(default=3)
     keep_archived_on_new_message = models.BooleanField(default=False)
     notification_overrides = models.JSONField(default=dict, blank=True)
+    who_can_start_calls = models.CharField(max_length=20, choices=Group.PERM_CHOICES, default=Group.PERM_ADMINS)
+    voice_calls_enabled = models.BooleanField(default=True)
+    video_calls_enabled = models.BooleanField(default=True)
+    maximum_call_participants = models.PositiveIntegerField(default=16)
+    call_join_requires_approval = models.BooleanField(default=False)
+    allow_member_call_invites = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1500,6 +1511,10 @@ class NotificationPreference(models.Model):
     group_messages = models.BooleanField(default=True)
     group_mentions = models.BooleanField(default=True)
     group_role_changes = models.BooleanField(default=True)
+    incoming_calls = models.BooleanField(default=True)
+    missed_calls = models.BooleanField(default=True)
+    declined_calls = models.BooleanField(default=True)
+    group_calls = models.BooleanField(default=True)
     followers = models.BooleanField(default=True)
     likes = models.BooleanField(default=True)
     comments = models.BooleanField(default=True)
@@ -1563,5 +1578,383 @@ class AdminAnnouncement(models.Model):
     status = models.CharField(max_length=20, default=STATUS_DRAFT)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+
+# Phase 7 calls, moderation, appeals, and professional accounts
+class Call(models.Model):
+    TYPE_PRIVATE_VOICE = "private_voice"
+    TYPE_PRIVATE_VIDEO = "private_video"
+    TYPE_GROUP_VOICE = "group_voice"
+    TYPE_GROUP_VIDEO = "group_video"
+    TYPES = [(TYPE_PRIVATE_VOICE, "Private voice"), (TYPE_PRIVATE_VIDEO, "Private video"), (TYPE_GROUP_VOICE, "Group voice"), (TYPE_GROUP_VIDEO, "Group video")]
+    STATUS_INITIATING = "initiating"
+    STATUS_RINGING = "ringing"
+    STATUS_CONNECTING = "connecting"
+    STATUS_ACTIVE = "active"
+    STATUS_RECONNECTING = "reconnecting"
+    STATUS_DECLINED = "declined"
+    STATUS_MISSED = "missed"
+    STATUS_BUSY = "busy"
+    STATUS_FAILED = "failed"
+    STATUS_ENDED = "ended"
+    STATUS_CANCELLED = "cancelled"
+    STATUSES = [(STATUS_INITIATING, "Initiating"), (STATUS_RINGING, "Ringing"), (STATUS_CONNECTING, "Connecting"), (STATUS_ACTIVE, "Active"), (STATUS_RECONNECTING, "Reconnecting"), (STATUS_DECLINED, "Declined"), (STATUS_MISSED, "Missed"), (STATUS_BUSY, "Busy"), (STATUS_FAILED, "Failed"), (STATUS_ENDED, "Ended"), (STATUS_CANCELLED, "Cancelled")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    call_type = models.CharField(max_length=30, choices=TYPES)
+    conversation = models.ForeignKey(Conversation, on_delete=models.SET_NULL, null=True, blank=True, related_name="calls")
+    group = models.ForeignKey(Group, on_delete=models.SET_NULL, null=True, blank=True, related_name="calls")
+    initiator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="initiated_calls")
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_INITIATING)
+    started_at = models.DateTimeField(null=True, blank=True)
+    answered_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    duration_seconds = models.PositiveIntegerField(default=0)
+    failure_reason = models.CharField(max_length=280, blank=True)
+    provider = models.CharField(max_length=40, default="webrtc")
+    signaling_metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        indexes = [models.Index(fields=["status", "updated_at"]), models.Index(fields=["initiator", "created_at"]), models.Index(fields=["conversation", "created_at"]), models.Index(fields=["group", "created_at"])]
+
+
+class CallParticipant(models.Model):
+    ROLE_HOST = "host"
+    ROLE_INVITEE = "invitee"
+    ROLE_MEMBER = "member"
+    ROLES = [(ROLE_HOST, "Host"), (ROLE_INVITEE, "Invitee"), (ROLE_MEMBER, "Member")]
+    STATUS_INVITED = "invited"
+    STATUS_RINGING = "ringing"
+    STATUS_JOINED = "joined"
+    STATUS_LEFT = "left"
+    STATUS_DECLINED = "declined"
+    STATUS_MISSED = "missed"
+    STATUS_BUSY = "busy"
+    STATUS_REMOVED = "removed"
+    STATUSES = [(STATUS_INVITED, "Invited"), (STATUS_RINGING, "Ringing"), (STATUS_JOINED, "Joined"), (STATUS_LEFT, "Left"), (STATUS_DECLINED, "Declined"), (STATUS_MISSED, "Missed"), (STATUS_BUSY, "Busy"), (STATUS_REMOVED, "Removed")]
+    call = models.ForeignKey(Call, on_delete=models.CASCADE, related_name="participants")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="call_participations")
+    role = models.CharField(max_length=20, choices=ROLES, default=ROLE_INVITEE)
+    join_status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_INVITED)
+    joined_at = models.DateTimeField(null=True, blank=True)
+    left_at = models.DateTimeField(null=True, blank=True)
+    device_identifier = models.CharField(max_length=120, blank=True)
+    is_muted = models.BooleanField(default=False)
+    camera_enabled = models.BooleanField(default=False)
+    screen_share_enabled = models.BooleanField(default=False)
+    connection_quality = models.JSONField(default=dict, blank=True)
+    last_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["call", "user"], name="unique_call_participant")]
+        indexes = [models.Index(fields=["call", "join_status"]), models.Index(fields=["user", "updated_at"])]
+
+
+class CallDeviceSession(models.Model):
+    call = models.ForeignKey(Call, on_delete=models.CASCADE, related_name="device_sessions")
+    participant = models.ForeignKey(CallParticipant, on_delete=models.CASCADE, related_name="device_sessions")
+    device_id = models.CharField(max_length=120)
+    channel_name = models.CharField(max_length=255, blank=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    disconnected_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["call", "participant", "device_id"], name="unique_call_device_session")]
+
+
+class CallSignalEvent(models.Model):
+    call = models.ForeignKey(Call, on_delete=models.CASCADE, related_name="signal_events")
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_call_signal_events")
+    event_name = models.CharField(max_length=60)
+    request_id = models.CharField(max_length=120, blank=True)
+    safe_payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        indexes = [models.Index(fields=["call", "created_at"]), models.Index(fields=["event_name"])]
+
+
+class CallHistory(models.Model):
+    call = models.ForeignKey(Call, on_delete=models.CASCADE, related_name="history_items")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="call_history")
+    direction = models.CharField(max_length=20)
+    local_deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["call", "user"], name="unique_call_history_user")]
+        indexes = [models.Index(fields=["user", "created_at"])]
+
+
+class CallReport(models.Model):
+    REASONS = PostReport.REASONS + [("impersonation", "Impersonation"), ("sexual_misconduct", "Sexual misconduct"), ("threats", "Threats")]
+    call = models.ForeignKey(Call, on_delete=models.CASCADE, related_name="reports")
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name="call_reports")
+    reason = models.CharField(max_length=40, choices=REASONS)
+    details = models.TextField(blank=True, max_length=1000)
+    status = models.CharField(max_length=20, choices=MessageReport.STATUSES, default=MessageReport.STATUS_PENDING)
+    context_snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["call", "reporter", "reason"], name="unique_call_report_reason")]
+        indexes = [models.Index(fields=["status", "created_at"])]
+
+
+class ModerationAction(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_UNDER_REVIEW = "under_review"
+    STATUS_ESCALATED = "escalated"
+    STATUS_RESOLVED = "resolved"
+    STATUS_REJECTED = "rejected"
+    STATUS_ACTION_TAKEN = "action_taken"
+    STATUSES = [(STATUS_PENDING, "Pending"), (STATUS_UNDER_REVIEW, "Under review"), (STATUS_ESCALATED, "Escalated"), (STATUS_RESOLVED, "Resolved"), (STATUS_REJECTED, "Rejected"), (STATUS_ACTION_TAKEN, "Action taken")]
+    ACTION_WARNING = "warning"
+    ACTION_CONTENT_REMOVAL = "content_removal"
+    ACTION_FEATURE_RESTRICTION = "feature_restriction"
+    ACTION_CALL_RESTRICTION = "call_restriction"
+    ACTION_GROUP_RESTRICTION = "group_restriction"
+    ACTION_TEMP_SUSPENSION = "temporary_suspension"
+    ACTION_PERMANENT_BAN = "permanent_ban"
+    ACTION_VERIFICATION_REMOVAL = "verification_removal"
+    ACTION_CREATOR_REMOVAL = "creator_status_removal"
+    ACTION_BUSINESS_REMOVAL = "business_status_removal"
+    ACTIONS = [(ACTION_WARNING, "Warning"), (ACTION_CONTENT_REMOVAL, "Content removal"), (ACTION_FEATURE_RESTRICTION, "Feature restriction"), (ACTION_CALL_RESTRICTION, "Call restriction"), (ACTION_GROUP_RESTRICTION, "Group restriction"), (ACTION_TEMP_SUSPENSION, "Temporary suspension"), (ACTION_PERMANENT_BAN, "Permanent ban"), (ACTION_VERIFICATION_REMOVAL, "Verification removal"), (ACTION_CREATOR_REMOVAL, "Creator status removal"), (ACTION_BUSINESS_REMOVAL, "Business status removal")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    target_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="moderation_actions")
+    moderator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="issued_moderation_actions")
+    action_type = models.CharField(max_length=40, choices=ACTIONS)
+    status = models.CharField(max_length=30, choices=STATUSES, default=STATUS_PENDING)
+    reason = models.CharField(max_length=280)
+    object_type = models.CharField(max_length=60, blank=True)
+    object_id = models.CharField(max_length=80, blank=True)
+    internal_notes = models.TextField(blank=True)
+    appeal_eligible = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        indexes = [models.Index(fields=["target_user", "status"]), models.Index(fields=["status", "created_at"]), models.Index(fields=["object_type", "object_id"])]
+
+
+class CallModerationAction(models.Model):
+    call = models.ForeignKey(Call, on_delete=models.CASCADE, related_name="moderation_actions")
+    moderation_action = models.ForeignKey(ModerationAction, on_delete=models.CASCADE, related_name="call_actions")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class UserFeatureRestriction(models.Model):
+    FEATURE_POST = "post"
+    FEATURE_COMMENT = "comment"
+    FEATURE_STORY = "story"
+    FEATURE_REEL = "reel"
+    FEATURE_MESSAGE = "message"
+    FEATURE_CREATE_GROUP = "create_group"
+    FEATURE_JOIN_GROUP = "join_group"
+    FEATURE_START_CALL = "start_call"
+    FEATURE_RECEIVE_CALL = "receive_call"
+    FEATURE_PROFESSIONAL = "professional"
+    FEATURES = [(FEATURE_POST, "Post"), (FEATURE_COMMENT, "Comment"), (FEATURE_STORY, "Story"), (FEATURE_REEL, "Reel"), (FEATURE_MESSAGE, "Message"), (FEATURE_CREATE_GROUP, "Create group"), (FEATURE_JOIN_GROUP, "Join group"), (FEATURE_START_CALL, "Start call"), (FEATURE_RECEIVE_CALL, "Receive call"), (FEATURE_PROFESSIONAL, "Professional features")]
+    STATUS_ACTIVE = "active"
+    STATUS_EXPIRED = "expired"
+    STATUS_REVOKED = "revoked"
+    STATUSES = [(STATUS_ACTIVE, "Active"), (STATUS_EXPIRED, "Expired"), (STATUS_REVOKED, "Revoked")]
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="feature_restrictions")
+    feature = models.CharField(max_length=40, choices=FEATURES)
+    reason = models.CharField(max_length=280)
+    moderator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="issued_feature_restrictions")
+    starts_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_ACTIVE)
+    appeal_eligible = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        indexes = [models.Index(fields=["user", "feature", "status"]), models.Index(fields=["expires_at"])]
+
+
+class ModerationAppeal(models.Model):
+    STATUS_SUBMITTED = "submitted"
+    STATUS_UNDER_REVIEW = "under_review"
+    STATUS_APPROVED = "approved"
+    STATUS_PARTIALLY_APPROVED = "partially_approved"
+    STATUS_REJECTED = "rejected"
+    ACTIVE_STATUSES = [STATUS_SUBMITTED, STATUS_UNDER_REVIEW]
+    STATUSES = [(STATUS_SUBMITTED, "Submitted"), (STATUS_UNDER_REVIEW, "Under review"), (STATUS_APPROVED, "Approved"), (STATUS_PARTIALLY_APPROVED, "Partially approved"), (STATUS_REJECTED, "Rejected")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    action = models.ForeignKey(ModerationAction, on_delete=models.CASCADE, related_name="appeals")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="moderation_appeals")
+    explanation = models.TextField(max_length=2000)
+    status = models.CharField(max_length=30, choices=STATUSES, default=STATUS_SUBMITTED)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        indexes = [models.Index(fields=["user", "status", "created_at"]), models.Index(fields=["action", "status"])]
+
+
+class AppealAttachment(models.Model):
+    appeal = models.ForeignKey(ModerationAppeal, on_delete=models.CASCADE, related_name="attachments")
+    file = models.FileField(upload_to="appeals/", null=True, blank=True)
+    file_name = models.CharField(max_length=180)
+    mime_type = models.CharField(max_length=120)
+    file_size = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AppealDecision(models.Model):
+    appeal = models.OneToOneField(ModerationAppeal, on_delete=models.CASCADE, related_name="decision")
+    reviewer = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="appeal_decisions")
+    decision = models.CharField(max_length=30, choices=ModerationAppeal.STATUSES)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ModerationEvidenceAccess(models.Model):
+    moderator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="moderation_evidence_accesses")
+    object_type = models.CharField(max_length=60)
+    object_id = models.CharField(max_length=80)
+    reason = models.CharField(max_length=280, blank=True)
+    accessed_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        indexes = [models.Index(fields=["moderator", "accessed_at"]), models.Index(fields=["object_type", "object_id"])]
+
+
+class ProfessionalAccount(models.Model):
+    TYPE_CREATOR = "creator"
+    TYPE_BUSINESS = "business"
+    TYPES = [(TYPE_CREATOR, "Creator"), (TYPE_BUSINESS, "Business")]
+    STATUS_ACTIVE = "active"
+    STATUS_PENDING = "pending"
+    STATUS_SUSPENDED = "suspended"
+    STATUS_REMOVED = "removed"
+    STATUSES = [(STATUS_ACTIVE, "Active"), (STATUS_PENDING, "Pending"), (STATUS_SUSPENDED, "Suspended"), (STATUS_REMOVED, "Removed")]
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="professional_account")
+    account_type = models.CharField(max_length=20, choices=TYPES)
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_ACTIVE)
+    category = models.CharField(max_length=80)
+    public_contact_enabled = models.BooleanField(default=False)
+    dashboard_settings = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class CreatorProfile(models.Model):
+    professional_account = models.OneToOneField(ProfessionalAccount, on_delete=models.CASCADE, related_name="creator_profile")
+    creator_category = models.CharField(max_length=80)
+    professional_bio = models.CharField(max_length=280, blank=True)
+    collaboration_email = models.EmailField(blank=True)
+    public_contact = models.CharField(max_length=120, blank=True)
+    collaboration_enabled = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class BusinessProfile(models.Model):
+    professional_account = models.OneToOneField(ProfessionalAccount, on_delete=models.CASCADE, related_name="business_profile")
+    business_name = models.CharField(max_length=120)
+    business_category = models.CharField(max_length=80)
+    description = models.TextField(blank=True, max_length=1000)
+    website = models.URLField(blank=True)
+    email = models.EmailField(blank=True)
+    show_phone_number = models.BooleanField(default=False)
+    public_phone_number = models.CharField(max_length=20, blank=True)
+    physical_location = models.CharField(max_length=180, blank=True)
+    business_hours = models.JSONField(default=dict, blank=True)
+    contact_buttons = models.JSONField(default=list, blank=True)
+    team_architecture = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class VerificationRequest(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_SUBMITTED = "submitted"
+    STATUS_UNDER_REVIEW = "under_review"
+    STATUS_MORE_INFO = "more_information_required"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CANCELLED = "cancelled"
+    STATUSES = [(STATUS_DRAFT, "Draft"), (STATUS_SUBMITTED, "Submitted"), (STATUS_UNDER_REVIEW, "Under review"), (STATUS_MORE_INFO, "More information required"), (STATUS_APPROVED, "Approved"), (STATUS_REJECTED, "Rejected"), (STATUS_CANCELLED, "Cancelled")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="verification_requests")
+    account_type = models.CharField(max_length=20, choices=ProfessionalAccount.TYPES)
+    public_name = models.CharField(max_length=120)
+    category = models.CharField(max_length=80)
+    reason = models.TextField(max_length=2000)
+    supporting_links = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=40, choices=STATUSES, default=STATUS_SUBMITTED)
+    internal_notes = models.TextField(blank=True)
+    decided_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="decided_verification_requests")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        indexes = [models.Index(fields=["user", "status", "created_at"]), models.Index(fields=["status", "created_at"])]
+
+
+class VerificationDocument(models.Model):
+    request = models.ForeignKey(VerificationRequest, on_delete=models.CASCADE, related_name="documents")
+    file = models.FileField(upload_to="verification-documents/", null=True, blank=True)
+    file_name = models.CharField(max_length=180)
+    mime_type = models.CharField(max_length=120)
+    file_size = models.PositiveIntegerField(default=0)
+    retention_until = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ProfessionalInsightDaily(models.Model):
+    professional_account = models.ForeignKey(ProfessionalAccount, on_delete=models.CASCADE, related_name="daily_insights")
+    date = models.DateField()
+    profile_views = models.PositiveIntegerField(default=0)
+    follower_growth = models.IntegerField(default=0)
+    post_impressions = models.PositiveIntegerField(default=0)
+    post_reach = models.PositiveIntegerField(default=0)
+    post_engagement = models.PositiveIntegerField(default=0)
+    reel_views = models.PositiveIntegerField(default=0)
+    reel_watch_time_seconds = models.PositiveIntegerField(default=0)
+    story_views = models.PositiveIntegerField(default=0)
+    story_completion = models.FloatField(default=0)
+    saves = models.PositiveIntegerField(default=0)
+    shares = models.PositiveIntegerField(default=0)
+    comments = models.PositiveIntegerField(default=0)
+    message_response_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["professional_account", "date"], name="unique_professional_insight_day")]
+
+
+class ContentInsight(models.Model):
+    professional_account = models.ForeignKey(ProfessionalAccount, on_delete=models.CASCADE, related_name="content_insights")
+    content_type = models.CharField(max_length=30)
+    object_id = models.CharField(max_length=80)
+    impressions = models.PositiveIntegerField(default=0)
+    reach = models.PositiveIntegerField(default=0)
+    engagement = models.PositiveIntegerField(default=0)
+    saves = models.PositiveIntegerField(default=0)
+    shares = models.PositiveIntegerField(default=0)
+    comments = models.PositiveIntegerField(default=0)
+    watch_time_seconds = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["professional_account", "content_type", "object_id"], name="unique_content_insight_object")]
+
+
+class AudienceInsight(models.Model):
+    professional_account = models.ForeignKey(ProfessionalAccount, on_delete=models.CASCADE, related_name="audience_insights")
+    snapshot_date = models.DateField()
+    metrics = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["professional_account", "snapshot_date"], name="unique_audience_insight_snapshot")]
+
+
+class BusinessContactAction(models.Model):
+    professional_account = models.ForeignKey(ProfessionalAccount, on_delete=models.CASCADE, related_name="contact_actions")
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="business_contact_actions")
+    action_type = models.CharField(max_length=40)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        indexes = [models.Index(fields=["professional_account", "created_at"])]
 
 
