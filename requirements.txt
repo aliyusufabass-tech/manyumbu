@@ -1,0 +1,8 @@
+Django==6.0.8
+Pillow==12.3.0
+psycopg[binary]==3.2.13
+redis==6.4.0
+celery==5.6.0
+channels==4.3.1
+daphne==4.2.1
+cloudinary==1.44.1

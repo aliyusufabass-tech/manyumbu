@@ -1,0 +1,28 @@
+{
+  "name": "manyumbu-admin-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.85.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "axios": "^1.11.0",
+    "lucide-react": "^0.475.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^2.15.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0",
+    "@types/react": "^19.0.14",
+    "@types/react-dom": "^19.0.6"
+  }
+}

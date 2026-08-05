@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "Manyumbu",
+    "slug": "manyumbu",
+    "scheme": "manyumbu",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "com.manyumbu.app"
+    },
+    "plugins": ["expo-router", "expo-secure-store"]
+  }
+}
