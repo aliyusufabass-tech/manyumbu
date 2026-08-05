@@ -1,5 +1,26 @@
 from django.urls import path
 
+from .phase4_views import (
+    AdminStoryReelView,
+    HighlightListView,
+    HighlightStoryView,
+    HighlightView,
+    ReelCollectionView,
+    ReelCommentsView,
+    ReelDetailView,
+    ReelFeedView,
+    ReelListsView,
+    ReelSimpleActionView,
+    StoryCollectionView,
+    StoryDetailView,
+    StoryPollVoteView,
+    StoryReactionView,
+    StoryReplyView,
+    StoryReportView,
+    StoryTrayView,
+    StoryViewersView,
+    StoryViewView,
+)
 from .post_views import (
     AdminPostManagementView,
     ArchivedPostsView,
@@ -70,9 +91,35 @@ urlpatterns = [
     path("relationships/muted/<str:username>/", MutedView.as_view(), name="muted-action"),
     path("relationships/close-friends/", CloseFriendsView.as_view(), name="close-friends-list"),
     path("relationships/close-friends/<str:username>/", CloseFriendsView.as_view(), name="close-friends-action"),
+    path("stories/", StoryCollectionView.as_view(), name="story-create"),
+    path("stories/tray/", StoryTrayView.as_view(), name="story-tray"),
+    path("stories/<uuid:story_id>/", StoryDetailView.as_view(), name="story-detail"),
+    path("stories/<uuid:story_id>/view/", StoryViewView.as_view(), name="story-view"),
+    path("stories/<uuid:story_id>/viewers/", StoryViewersView.as_view(), name="story-viewers"),
+    path("stories/<uuid:story_id>/react/", StoryReactionView.as_view(), name="story-react"),
+    path("stories/<uuid:story_id>/reply/", StoryReplyView.as_view(), name="story-reply"),
+    path("stories/<uuid:story_id>/report/", StoryReportView.as_view(), name="story-report"),
+    path("stories/<uuid:story_id>/poll-vote/", StoryPollVoteView.as_view(), name="story-poll-vote"),
+    path("users/<str:username>/highlights/", HighlightListView.as_view(), name="user-highlights"),
+    path("highlights/", HighlightView.as_view(), name="highlight-create"),
+    path("highlights/<uuid:highlight_id>/", HighlightView.as_view(), name="highlight-detail"),
+    path("highlights/<uuid:highlight_id>/stories/", HighlightStoryView.as_view(), name="highlight-add-story"),
+    path("highlights/<uuid:highlight_id>/stories/<uuid:story_id>/", HighlightStoryView.as_view(), name="highlight-remove-story"),
+    path("reels/", ReelCollectionView.as_view(), name="reel-create"),
+    path("reels/feed/", ReelFeedView.as_view(), name="reel-feed"),
+    path("reels/<uuid:reel_id>/", ReelDetailView.as_view(), name="reel-detail"),
+    path("reels/<uuid:reel_id>/comments/", ReelCommentsView.as_view(), name="reel-comments"),
+    path("reels/<uuid:reel_id>/<str:action>/", ReelSimpleActionView.as_view(), name="reel-action"),
+    path("me/saved-reels/", ReelListsView.as_view(), {"list_name": "saved"}, name="saved-reels"),
+    path("me/reel-drafts/", ReelListsView.as_view(), {"list_name": "drafts"}, name="reel-drafts"),
+    path("me/archived-reels/", ReelListsView.as_view(), {"list_name": "archived"}, name="archived-reels"),
+    path("users/<str:username>/reels/", ReelListsView.as_view(), name="user-reels"),
+    path("reel-hashtags/<str:hashtag>/", ReelListsView.as_view(), name="reel-hashtag"),
     path("admin/posts/", AdminPostManagementView.as_view(), name="admin-posts"),
     path("admin/posts/<uuid:post_id>/", AdminPostManagementView.as_view(), name="admin-post-detail"),
     path("admin/posts/<uuid:post_id>/<str:action>/", AdminPostManagementView.as_view(), name="admin-post-action"),
+    path("admin/<str:kind>/", AdminStoryReelView.as_view(), name="admin-story-reel-list"),
+    path("admin/<str:kind>/<uuid:item_id>/<str:action>/", AdminStoryReelView.as_view(), name="admin-story-reel-action"),
     path("posts/", PostCollectionView.as_view(), name="post-collection"),
     path("posts/<uuid:post_id>/like/", PostLikeView.as_view(), name="post-like"),
     path("posts/<uuid:post_id>/save/", PostSaveView.as_view(), name="post-save"),
@@ -92,6 +139,8 @@ urlpatterns = [
     path("hashtags/<str:hashtag>/posts/", HashtagPostsView.as_view(), name="hashtag-posts"),
     path("relationships/<str:list_name>/", RelationshipListView.as_view(), name="relationship-list"),
 ]
+
+
 
 
 

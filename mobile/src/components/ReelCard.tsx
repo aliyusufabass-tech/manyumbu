@@ -1,0 +1,7 @@
+import { Ionicons } from "@expo/vector-icons";
+import { Pressable, Share, Text, View } from "react-native";
+import type { Reel } from "../types/phase4";
+
+export function ReelCard({ reel, onLike, onSave }: { reel: Reel; onLike?: () => void; onSave?: () => void }) {
+  return <View style={{ flex: 1, minHeight: 620, backgroundColor: "#101816", padding: 20, justifyContent: "flex-end", gap: 14 }}><View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center" }}><Ionicons name="play-circle-outline" size={72} color="white" /><Text style={{ color: "white", marginTop: 10 }}>{reel.processing_status === "ready" ? "Ready" : reel.processing_status}</Text></View><Text style={{ color: "white", fontWeight: "800", fontSize: 18 }}>@{reel.author.username}</Text><Text style={{ color: "white", lineHeight: 22 }}>{reel.caption}</Text><View style={{ flexDirection: "row", gap: 18 }}><Pressable onPress={onLike}><Ionicons name={reel.viewer_has_liked ? "heart" : "heart-outline"} size={28} color={reel.viewer_has_liked ? "#FF6B6B" : "white"} /></Pressable><Pressable onPress={onSave}><Ionicons name={reel.viewer_has_saved ? "bookmark" : "bookmark-outline"} size={28} color="white" /></Pressable><Pressable onPress={() => Share.share({ message: `manyumbu://reel/${reel.id}` })}><Ionicons name="share-social-outline" size={28} color="white" /></Pressable><Text style={{ color: "white" }}>{reel.like_count} likes · {reel.view_count} views</Text></View></View>;
+}

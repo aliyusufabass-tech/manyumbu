@@ -493,3 +493,167 @@ class PhaseThreeAdminPostManagementTests(TestCase):
         response = self.client.get("/api/v1/admin/posts/", **self.auth(self.user_token))
         self.assertEqual(response.status_code, 403)
 
+
+from .models import Reel, ReelLike, ReelReport, ReelView, SavedReel, Story, StoryHighlight, StoryPollVote, StoryReaction, StoryReport, StoryView
+
+
+class PhaseFourStoryReelTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        User = get_user_model()
+        self.alice = User.objects.create_user("+255733000001", "sa@example.com", "storyalice", "Story Alice", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.bob = User.objects.create_user("+255733000002", "sb@example.com", "storybob", "Story Bob", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.caro = User.objects.create_user("+255733000003", "sc@example.com", "storycaro", "Story Caro", "StrongerPass123!", date_of_birth="1995-01-01", is_active=True, is_email_verified=True)
+        self.admin = User.objects.create_user("+255733000004", "sd@example.com", "storyadmin", "Story Admin", "StrongerPass123!", date_of_birth="1990-01-01", is_active=True, is_email_verified=True, is_staff=True)
+        for user in [self.alice, self.bob, self.caro, self.admin]:
+            ensure_profile_records(user)
+        self.alice_token = issue_tokens(self.alice)["access"]
+        self.bob_token = issue_tokens(self.bob)["access"]
+        self.caro_token = issue_tokens(self.caro)["access"]
+        self.admin_token = issue_tokens(self.admin)["access"]
+
+    def auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def post_json(self, url, payload=None, token=None):
+        return self.client.post(url, data=json.dumps(payload or {}), content_type="application/json", **self.auth(token or self.alice_token))
+
+    def create_story(self, **extra):
+        payload = {"caption": "Story #Daily @storybob", "audience": "everyone", **extra}
+        response = self.post_json("/api/v1/stories/", payload)
+        self.assertEqual(response.status_code, 201, response.content)
+        return Story.objects.get(id=response.json()["data"]["story"]["id"])
+
+    def create_reel(self, token=None, **extra):
+        video = SimpleUploadedFile("r.mp4", b"video", content_type="video/mp4")
+        data = {"caption": "Reel #Dance @storybob", "audience": "public", "duration": "12", **extra, "video": video}
+        response = self.client.post("/api/v1/reels/", data, **self.auth(token or self.alice_token))
+        self.assertEqual(response.status_code, 201, response.content)
+        return Reel.objects.get(id=response.json()["data"]["reel"]["id"])
+
+    def test_text_story_creation_expiration_and_tray_exclusion(self):
+        story = self.create_story(background_style="mint")
+        self.assertEqual(story.story_type, Story.TYPE_TEXT)
+        self.assertIsNotNone(story.expires_at)
+        response = self.client.get("/api/v1/stories/tray/", **self.auth(self.bob_token))
+        self.assertEqual(response.json()["data"]["count"], 1)
+        story.expires_at = timezone.now() - timedelta(seconds=1)
+        story.save(update_fields=["expires_at"])
+        response = self.client.get("/api/v1/stories/tray/", **self.auth(self.bob_token))
+        self.assertEqual(response.json()["data"]["count"], 0)
+        story.refresh_from_db()
+        self.assertEqual(story.status, Story.STATUS_EXPIRED)
+
+    def test_image_story_video_validation_and_visibility_rules(self):
+        image = SimpleUploadedFile("s.jpg", b"image", content_type="image/jpeg")
+        response = self.client.post("/api/v1/stories/", {"caption": "image", "media": image}, **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 201, response.content)
+        bad = SimpleUploadedFile("s.txt", b"bad", content_type="text/plain")
+        response = self.client.post("/api/v1/stories/", {"caption": "bad", "media": bad}, **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 400)
+        private = self.create_story(audience=Story.AUDIENCE_FOLLOWERS)
+        self.assertEqual(self.client.get(f"/api/v1/stories/{private.id}/", **self.auth(self.bob_token)).status_code, 403)
+        Follow.objects.create(follower=self.bob, following=self.alice)
+        self.assertEqual(self.client.get(f"/api/v1/stories/{private.id}/", **self.auth(self.bob_token)).status_code, 200)
+        close = self.create_story(audience=Story.AUDIENCE_CLOSE_FRIENDS)
+        self.assertEqual(self.client.get(f"/api/v1/stories/{close.id}/", **self.auth(self.caro_token)).status_code, 403)
+        CloseFriend.objects.create(owner=self.alice, friend=self.caro)
+        self.assertEqual(self.client.get(f"/api/v1/stories/{close.id}/", **self.auth(self.caro_token)).status_code, 200)
+
+    def test_selected_hidden_private_blocked_and_muted_story_rules(self):
+        selected = self.create_story(audience=Story.AUDIENCE_SELECTED, selected_users=["storybob"])
+        self.assertEqual(self.client.get(f"/api/v1/stories/{selected.id}/", **self.auth(self.bob_token)).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/v1/stories/{selected.id}/", **self.auth(self.caro_token)).status_code, 403)
+        hidden = self.create_story(audience=Story.AUDIENCE_HIDE_SELECTED, hidden_users=["storybob"])
+        self.assertEqual(self.client.get(f"/api/v1/stories/{hidden.id}/", **self.auth(self.bob_token)).status_code, 403)
+        MutedUser.objects.create(owner=self.bob, muted=self.alice, mute_stories=True)
+        response = self.client.get("/api/v1/stories/tray/", **self.auth(self.bob_token))
+        self.assertEqual(response.json()["data"]["count"], 0)
+        BlockedUser.objects.create(blocker=self.alice, blocked=self.caro)
+        self.assertEqual(self.client.get(f"/api/v1/stories/{hidden.id}/", **self.auth(self.caro_token)).status_code, 403)
+
+    def test_story_views_viewer_permissions_reactions_replies_reports(self):
+        story = self.create_story()
+        self.assertEqual(self.post_json(f"/api/v1/stories/{story.id}/view/", token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/stories/{story.id}/view/", token=self.bob_token).status_code, 200)
+        self.assertEqual(StoryView.objects.filter(story=story, viewer=self.bob).count(), 1)
+        self.assertEqual(self.client.get(f"/api/v1/stories/{story.id}/viewers/", **self.auth(self.caro_token)).status_code, 403)
+        self.assertEqual(self.client.get(f"/api/v1/stories/{story.id}/viewers/", **self.auth(self.alice_token)).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/stories/{story.id}/react/", {"reaction": "fire"}, token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/stories/{story.id}/react/", {"reaction": "laugh"}, token=self.bob_token).status_code, 200)
+        self.assertEqual(StoryReaction.objects.get(story=story, user=self.bob).reaction, "laugh")
+        self.assertEqual(self.post_json(f"/api/v1/stories/{story.id}/reply/", {"text": "Nice"}, token=self.bob_token).status_code, 201)
+        story.replies_enabled = False
+        story.save(update_fields=["replies_enabled"])
+        self.assertEqual(self.post_json(f"/api/v1/stories/{story.id}/reply/", {"text": "No"}, token=self.bob_token).status_code, 403)
+        self.assertEqual(self.post_json(f"/api/v1/stories/{story.id}/report/", {"reason": "spam"}, token=self.bob_token).status_code, 200)
+        self.assertTrue(StoryReport.objects.filter(story=story, reporter=self.bob).exists())
+
+    def test_story_poll_voting_and_highlights(self):
+        story = self.create_story(poll={"question": "Go?", "options": ["Yes", "No"]})
+        option = story.poll.options.first()
+        self.assertEqual(self.post_json(f"/api/v1/stories/{story.id}/poll-vote/", {"option_id": option.id}, token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/stories/{story.id}/poll-vote/", {"option_id": option.id}, token=self.bob_token).status_code, 200)
+        self.assertEqual(StoryPollVote.objects.filter(poll=story.poll, voter=self.bob).count(), 1)
+        story.expires_at = timezone.now() - timedelta(hours=1)
+        story.status = Story.STATUS_EXPIRED
+        story.save()
+        response = self.post_json("/api/v1/highlights/", {"title": "Best"})
+        self.assertEqual(response.status_code, 201)
+        highlight_id = response.json()["data"]["highlight_id"]
+        self.assertEqual(self.post_json(f"/api/v1/highlights/{highlight_id}/stories/", {"story_id": str(story.id)}).status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/users/storyalice/highlights/", **self.auth(self.bob_token)).status_code, 200)
+
+    def test_reel_creation_validation_feed_visibility_and_cursor(self):
+        first = self.create_reel(caption="one #reel")
+        second = self.create_reel(caption="two #reel")
+        bad = SimpleUploadedFile("bad.txt", b"bad", content_type="text/plain")
+        response = self.client.post("/api/v1/reels/", {"caption": "bad", "video": bad}, **self.auth(self.alice_token))
+        self.assertEqual(response.status_code, 400)
+        response = self.client.get("/api/v1/reels/feed/?limit=1", **self.auth(self.bob_token))
+        self.assertEqual(len(response.json()["data"]["results"]), 1)
+        cursor = response.json()["data"]["next_cursor"]
+        response = self.client.get(f"/api/v1/reels/feed/?limit=1&cursor={cursor}", **self.auth(self.bob_token))
+        ids = [item["id"] for item in response.json()["data"]["results"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        private = self.create_reel(audience=Post.AUDIENCE_FOLLOWERS)
+        self.assertEqual(self.client.get(f"/api/v1/reels/{private.id}/", **self.auth(self.caro_token)).status_code, 403)
+
+    def test_reel_like_save_view_comment_archive_report_hide_not_interested(self):
+        reel = self.create_reel()
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/like/", token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/like/", token=self.bob_token).status_code, 200)
+        self.assertEqual(ReelLike.objects.filter(reel=reel, user=self.bob).count(), 1)
+        self.assertEqual(self.client.delete(f"/api/v1/reels/{reel.id}/like/", **self.auth(self.bob_token)).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/save/", token=self.bob_token).status_code, 200)
+        self.assertTrue(SavedReel.objects.filter(reel=reel, user=self.bob).exists())
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/view/", {"watch_duration": 3, "completion_percentage": 91}, token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/view/", {"watch_duration": 4}, token=self.bob_token).status_code, 200)
+        self.assertEqual(ReelView.objects.filter(reel=reel, viewer=self.bob).count(), 1)
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/comments/", {"text": "Great"}, token=self.bob_token).status_code, 201)
+        reel.comments_enabled = False
+        reel.save(update_fields=["comments_enabled"])
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/comments/", {"text": "No"}, token=self.bob_token).status_code, 403)
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/archive/").status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/me/archived-reels/", **self.auth(self.alice_token)).json()["data"]["count"], 1)
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/restore/").status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/report/", {"reason": "spam"}, token=self.bob_token).status_code, 200)
+        self.assertTrue(ReelReport.objects.filter(reel=reel, reporter=self.bob).exists())
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/hide/", token=self.bob_token).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/reels/{reel.id}/not-interested/", token=self.caro_token).status_code, 200)
+
+    def test_reel_owner_permissions_and_admin_moderation(self):
+        reel = self.create_reel()
+        self.assertEqual(self.client.patch(f"/api/v1/reels/{reel.id}/", data=json.dumps({"caption": "bad"}), content_type="application/json", **self.auth(self.bob_token)).status_code, 403)
+        self.assertEqual(self.client.delete(f"/api/v1/reels/{reel.id}/", **self.auth(self.bob_token)).status_code, 403)
+        self.assertEqual(self.client.patch(f"/api/v1/reels/{reel.id}/", data=json.dumps({"caption": "new"}), content_type="application/json", **self.auth(self.alice_token)).status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/admin/reels/", **self.auth(self.admin_token)).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/admin/reels/{reel.id}/remove/", {"reason": "policy"}, token=self.admin_token).status_code, 200)
+        reel.refresh_from_db()
+        self.assertEqual(reel.status, Reel.STATUS_REMOVED)
+        self.assertTrue(AdminAuditLog.objects.filter(admin_user=self.admin, action="reels_remove").exists())
+        story = self.create_story()
+        self.assertEqual(self.client.get("/api/v1/admin/stories/", **self.auth(self.admin_token)).status_code, 200)
+        self.assertEqual(self.post_json(f"/api/v1/admin/stories/{story.id}/remove/", {"reason": "policy"}, token=self.admin_token).status_code, 200)
+        story.refresh_from_db()
+        self.assertEqual(story.status, Story.STATUS_REMOVED)

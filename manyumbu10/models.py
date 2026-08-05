@@ -515,3 +515,311 @@ class AdminAuditLog(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=["admin_user", "created_at"]), models.Index(fields=["action"])]
+
+class Story(models.Model):
+    TYPE_TEXT = "text"
+    TYPE_IMAGE = "image"
+    TYPE_VIDEO = "video"
+    TYPES = [(TYPE_TEXT, "Text"), (TYPE_IMAGE, "Image"), (TYPE_VIDEO, "Video")]
+    AUDIENCE_EVERYONE = "everyone"
+    AUDIENCE_FOLLOWERS = "followers"
+    AUDIENCE_CLOSE_FRIENDS = "close_friends"
+    AUDIENCE_SELECTED = "selected"
+    AUDIENCE_HIDE_SELECTED = "hide_selected"
+    AUDIENCES = [(AUDIENCE_EVERYONE, "Everyone"), (AUDIENCE_FOLLOWERS, "Followers"), (AUDIENCE_CLOSE_FRIENDS, "Close friends"), (AUDIENCE_SELECTED, "Selected users"), (AUDIENCE_HIDE_SELECTED, "Hide selected users")]
+    STATUS_DRAFT = "draft"
+    STATUS_PUBLISHED = "published"
+    STATUS_EXPIRED = "expired"
+    STATUS_DELETED = "deleted"
+    STATUS_REMOVED = "removed"
+    STATUSES = [(STATUS_DRAFT, "Draft"), (STATUS_PUBLISHED, "Published"), (STATUS_EXPIRED, "Expired"), (STATUS_DELETED, "Deleted"), (STATUS_REMOVED, "Removed")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name="stories")
+    story_type = models.CharField(max_length=20, choices=TYPES, default=TYPE_TEXT)
+    caption = models.TextField(blank=True, max_length=1000)
+    audience = models.CharField(max_length=20, choices=AUDIENCES, default=AUDIENCE_EVERYONE)
+    background_style = models.CharField(max_length=120, blank=True)
+    link_url = models.URLField(blank=True)
+    location_name = models.CharField(max_length=140, blank=True)
+    sticker_metadata = models.JSONField(default=dict, blank=True)
+    replies_enabled = models.BooleanField(default=True)
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_PUBLISHED)
+    published_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["author", "status", "expires_at"]), models.Index(fields=["audience", "status", "expires_at"])]
+
+
+class StoryMedia(models.Model):
+    story = models.OneToOneField(Story, on_delete=models.CASCADE, related_name="media")
+    file = models.FileField(upload_to="stories/")
+    media_type = models.CharField(max_length=20)
+    media_url = models.URLField(blank=True)
+    secure_url = models.URLField(blank=True)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    duration = models.FloatField(null=True, blank=True)
+    file_size = models.PositiveIntegerField(default=0)
+    thumbnail = models.FileField(upload_to="story-thumbnails/", null=True, blank=True)
+    upload_provider_id = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class StoryAudienceUser(models.Model):
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name="selected_audience")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="selected_stories")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["story", "user"], name="unique_story_audience_user")]
+
+
+class StoryHiddenUser(models.Model):
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name="hidden_users")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="hidden_from_stories")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["story", "user"], name="unique_story_hidden_user")]
+
+
+class StoryMention(models.Model):
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name="mentions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="story_mentions")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["story", "user"], name="unique_story_mention")]
+
+
+class StoryHashtag(models.Model):
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name="hashtags")
+    hashtag = models.ForeignKey(Hashtag, on_delete=models.CASCADE, related_name="story_links")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["story", "hashtag"], name="unique_story_hashtag")]
+
+
+class StoryView(models.Model):
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name="views")
+    viewer = models.ForeignKey(User, on_delete=models.CASCADE, related_name="story_views")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["story", "viewer"], name="unique_story_view")]
+        indexes = [models.Index(fields=["story", "created_at"])]
+
+
+class StoryReaction(models.Model):
+    REACTIONS = [("like", "Like"), ("laugh", "Laugh"), ("surprise", "Surprise"), ("sad", "Sad"), ("fire", "Fire"), ("celebration", "Celebration")]
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name="reactions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="story_reactions")
+    reaction = models.CharField(max_length=20, choices=REACTIONS)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["story", "user"], name="unique_story_reaction")]
+
+
+class StoryReply(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name="replies")
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name="story_replies")
+    text = models.TextField(max_length=1000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class StoryPoll(models.Model):
+    story = models.OneToOneField(Story, on_delete=models.CASCADE, related_name="poll")
+    question = models.CharField(max_length=180)
+    show_results = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class StoryPollOption(models.Model):
+    poll = models.ForeignKey(StoryPoll, on_delete=models.CASCADE, related_name="options")
+    text = models.CharField(max_length=80)
+    display_order = models.PositiveSmallIntegerField(default=0)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["poll", "display_order"], name="unique_story_poll_option_order")]
+
+
+class StoryPollVote(models.Model):
+    poll = models.ForeignKey(StoryPoll, on_delete=models.CASCADE, related_name="votes")
+    option = models.ForeignKey(StoryPollOption, on_delete=models.CASCADE, related_name="votes")
+    voter = models.ForeignKey(User, on_delete=models.CASCADE, related_name="story_poll_votes")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["poll", "voter"], name="unique_story_poll_vote")]
+
+
+class StoryHighlight(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="story_highlights")
+    title = models.CharField(max_length=60)
+    cover_image = models.ImageField(upload_to="highlight-covers/", null=True, blank=True)
+    display_order = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        indexes = [models.Index(fields=["owner", "display_order"])]
+
+
+class StoryHighlightItem(models.Model):
+    highlight = models.ForeignKey(StoryHighlight, on_delete=models.CASCADE, related_name="items")
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name="highlight_items")
+    display_order = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["highlight", "story"], name="unique_highlight_story")]
+
+
+class StoryReport(models.Model):
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name="reports")
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name="story_reports")
+    reason = models.CharField(max_length=40, choices=PostReport.REASONS)
+    details = models.TextField(blank=True, max_length=1000)
+    status = models.CharField(max_length=20, default=PostReport.STATUS_PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["story", "reporter", "reason"], name="unique_story_report_reason")]
+
+
+class Reel(models.Model):
+    AUDIENCES = Post.AUDIENCES
+    STATUS_DRAFT = "draft"
+    STATUS_PROCESSING = "processing"
+    STATUS_PUBLISHED = "published"
+    STATUS_FAILED = "failed"
+    STATUS_ARCHIVED = "archived"
+    STATUS_REMOVED = "removed"
+    STATUS_DELETED = "deleted"
+    PROCESSING_PENDING = "pending"
+    PROCESSING_READY = "ready"
+    PROCESSING_FAILED = "failed"
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reels")
+    caption = models.TextField(blank=True, max_length=2200)
+    audience = models.CharField(max_length=20, choices=AUDIENCES, default=Post.AUDIENCE_PUBLIC)
+    comments_enabled = models.BooleanField(default=True)
+    status = models.CharField(max_length=20, default=STATUS_PUBLISHED)
+    location_name = models.CharField(max_length=140, blank=True)
+    video = models.FileField(upload_to="reels/", null=True, blank=True)
+    cover_image = models.ImageField(upload_to="reel-covers/", null=True, blank=True)
+    video_url = models.URLField(blank=True)
+    thumbnail_url = models.URLField(blank=True)
+    duration = models.FloatField(null=True, blank=True)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    aspect_ratio = models.CharField(max_length=20, blank=True)
+    processing_status = models.CharField(max_length=20, default=PROCESSING_PENDING)
+    view_count = models.PositiveIntegerField(default=0)
+    share_count = models.PositiveIntegerField(default=0)
+    published_at = models.DateTimeField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        indexes = [models.Index(fields=["author", "status", "published_at"]), models.Index(fields=["audience", "status", "published_at"])]
+
+
+class ReelAudienceUser(models.Model):
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="selected_audience")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="selected_reels")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["reel", "user"], name="unique_reel_audience_user")]
+
+
+class ReelTag(models.Model):
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="tagged_users")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="tagged_reels")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["reel", "user"], name="unique_reel_tag")]
+
+
+class ReelMention(models.Model):
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="mentions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reel_mentions")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["reel", "user"], name="unique_reel_mention")]
+
+
+class ReelHashtag(models.Model):
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="hashtags")
+    hashtag = models.ForeignKey(Hashtag, on_delete=models.CASCADE, related_name="reel_links")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["reel", "hashtag"], name="unique_reel_hashtag")]
+
+
+class ReelLike(models.Model):
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="likes")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reel_likes")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["reel", "user"], name="unique_reel_like")]
+
+
+class SavedReel(models.Model):
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="saves")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="saved_reels")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["reel", "user"], name="unique_saved_reel")]
+
+
+class ReelView(models.Model):
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="views")
+    viewer = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reel_views")
+    watch_duration = models.FloatField(default=0)
+    completion_percentage = models.FloatField(default=0)
+    completed = models.BooleanField(default=False)
+    replay_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["reel", "viewer"], name="unique_reel_view")]
+
+
+class HiddenReel(models.Model):
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="hidden_by")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="hidden_reels")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["reel", "user"], name="unique_hidden_reel")]
+
+
+class ReelNotInterested(models.Model):
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="not_interested_by")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="not_interested_reels")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["reel", "user"], name="unique_reel_not_interested")]
+
+
+class ReelComment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="comments")
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reel_comments")
+    parent = models.ForeignKey("self", on_delete=models.CASCADE, related_name="replies", null=True, blank=True)
+    text = models.TextField(max_length=1000)
+    is_edited = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class ReelReport(models.Model):
+    reel = models.ForeignKey(Reel, on_delete=models.CASCADE, related_name="reports")
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reel_reports")
+    reason = models.CharField(max_length=40, choices=PostReport.REASONS)
+    details = models.TextField(blank=True, max_length=1000)
+    status = models.CharField(max_length=20, default=PostReport.STATUS_PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["reel", "reporter", "reason"], name="unique_reel_report_reason")]

@@ -4,6 +4,7 @@ import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { getMyProfile } from "../../src/api/profile";
 import { ProfileCard } from "../../src/components/ProfileCard";
 import { PostGrid } from "../../src/components/PostGrid";
+import { ReelGrid } from "../../src/components/ReelGrid";
 import { ScreenState } from "../../src/components/UserList";
 
 export default function MyProfileScreen() {
@@ -20,8 +21,9 @@ export default function MyProfileScreen() {
         <Link href="/relationships/following"><Text style={{ color: "#126C57", fontWeight: "800" }}>Following</Text></Link>
         <Link href="/profile/privacy"><Text style={{ color: "#126C57", fontWeight: "800" }}>Privacy</Text></Link>
       </View>
-      <View style={{ borderWidth: 1, borderColor: "#E2ECE7", borderRadius: 8, padding: 12 }}><Text style={{ fontWeight: "800", marginBottom: 8 }}>Posts</Text><PostGrid username={profile.username} /></View><View style={{ borderWidth: 1, borderColor: "#E2ECE7", borderRadius: 8, padding: 16 }}><Text style={{ fontWeight: "800" }}>Saved</Text><Link href="/posts/saved"><Text style={{ color: "#126C57", marginTop: 6 }}>Open saved posts</Text></Link></View>
+      <View style={{ borderWidth: 1, borderColor: "#E2ECE7", borderRadius: 8, padding: 12 }}><Text style={{ fontWeight: "800", marginBottom: 8 }}>Posts</Text><PostGrid username={profile.username} /></View><View style={{ borderWidth: 1, borderColor: "#E2ECE7", borderRadius: 8, padding: 12 }}><Text style={{ fontWeight: "800", marginBottom: 8 }}>Reels</Text><ReelGrid username={profile.username} /></View><View style={{ borderWidth: 1, borderColor: "#E2ECE7", borderRadius: 8, padding: 16 }}><Text style={{ fontWeight: "800" }}>Saved</Text><Link href="/posts/saved"><Text style={{ color: "#126C57", marginTop: 6 }}>Open saved posts</Text></Link></View>
     </ScrollView>
   );
 }
+
 

@@ -92,3 +92,8 @@ Phase 2 adds authenticated profile APIs, privacy controls, follow/follow-request
 ## Phase 3 Posts and Feed
 
 Phase 3 adds posts, media records, comments, likes, saved posts, hashtags, mentions, tags, reports, home feed, mobile post screens, profile post grids, and admin content-management basics. See `docs/phase-3-completion.md` for endpoints, test results, security notes, performance decisions, and manual testing instructions.
+
+## Phase 4 Stories and Reels
+
+Phase 4 adds stories, story media, reactions, replies, polls, highlights, reels, reel engagement, reel comments, feed/list endpoints, mobile story/reel screens, profile reel grids, and admin story/reel moderation. See docs/phase-4-completion.md for endpoints, migration details, test results, video-processing status, and known limitations.
+
