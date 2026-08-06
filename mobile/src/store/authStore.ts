@@ -6,6 +6,7 @@ type AuthState = {
   user: ManyumbuUser | null;
   tokens: AuthTokens | null;
   setSession: (user: ManyumbuUser, tokens: AuthTokens) => Promise<void>;
+  setUser: (user: ManyumbuUser) => void;
   signOut: () => Promise<void>;
 };
 
@@ -16,6 +17,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     await setTokenItem("manyumbu_access", tokens.access);
     await setTokenItem("manyumbu_refresh", tokens.refresh);
     set({ user, tokens });
+  },
+  setUser(user) {
+    set({ user });
   },
   async signOut() {
     await deleteTokenItem("manyumbu_access");

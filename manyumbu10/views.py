@@ -1,6 +1,7 @@
 import json
 from datetime import date
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -161,14 +162,15 @@ class LoginView(View):
             user = authenticate_identifier(payload["identifier"], payload["password"])
             if not user:
                 return response(False, "Invalid credentials.", status=401)
-            if not user.is_active or not user.is_email_verified:
-                user.is_active = True
-                user.is_email_verified = True
-                user.email_verified_at = user.email_verified_at or timezone.now()
-                user.save(update_fields=["is_active", "is_email_verified", "email_verified_at", "updated_at"])
-                ensure_profile_records(user)
+            if not user.is_active:
+                return response(False, "This account is not active.", status=403)
+            if not user.is_email_verified:
+                return response(False, "Email verification is required before signing in.", status=403)
+            ensure_profile_records(user)
             tokens = issue_tokens(user, request=request, device_name=payload.get("device_name", ""))
             return response(True, "Signed in successfully.", {"user": public_user(user), "tokens": tokens})
+        except PermissionError as exc:
+            return response(False, str(exc), status=403)
         except ValueError as exc:
             return response(False, str(exc), status=400)
 
@@ -267,3 +269,26 @@ class GoogleAuthStartView(View):
         except ValueError as exc:
             return response(False, str(exc), status=400)
 
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ChangePasswordView(View):
+    def post(self, request):
+        try:
+            from .profile_views import current_user
+            user = current_user(request)
+            payload = body(request)
+            required(payload, ["current_password", "password", "confirm_password"])
+            if not user.check_password(payload["current_password"]):
+                return response(False, "Current password is incorrect.", status=403)
+            if payload["password"] != payload["confirm_password"]:
+                return response(False, "Passwords do not match.", status=400)
+            validate_password(payload["password"], user=user)
+            user.set_password(payload["password"])
+            user.save(update_fields=["password", "updated_at"])
+            user.sessions.filter(revoked_at__isnull=True).update(revoked_at=timezone.now())
+            return response(True, "Password changed successfully. Please sign in again.")
+        except (ValueError, ValidationError) as exc:
+            detail = exc.messages if hasattr(exc, "messages") else str(exc)
+            return response(False, detail, status=400)
+        except PermissionError as exc:
+            return response(False, str(exc), status=401)

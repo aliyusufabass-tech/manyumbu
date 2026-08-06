@@ -1254,8 +1254,10 @@ class PhaseEightProductionReadinessTests(TestCase):
             "DJANGO_SECRET_KEY", "DATABASE_URL", "REDIS_URL", "DJANGO_ALLOWED_HOSTS", "CSRF_TRUSTED_ORIGINS",
             "EMAIL_HOST", "EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD", "DEFAULT_FROM_EMAIL",
             "MANYUMBU_STUN_SERVERS", "MANYUMBU_TURN_SERVER", "MANYUMBU_TURN_USERNAME", "MANYUMBU_TURN_PASSWORD",
+            "MANYUMBU_MEDIA_PROVIDER", "MANYUMBU_API_URL", "CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET",
         ]}
         complete_env["MANYUMBU_ENV"] = "production"
+        complete_env["MANYUMBU_MEDIA_PROVIDER"] = "cloudinary"
         self.assertEqual(validate_production_environment(complete_env), [])
         with self.assertRaises(ImproperlyConfigured):
             validate_production_environment({**complete_env, "SKIP_EMAIL_VERIFICATION": "True"})
@@ -1277,6 +1279,8 @@ class PhaseEightProductionReadinessTests(TestCase):
         created = self.post_json("/api/v1/account-deletion/", {"recent_auth_confirmed": True, "reason": "leaving"})
         self.assertEqual(created.status_code, 201, created.content)
         self.assertTrue(UserSession.objects.filter(user=self.user, revoked_at__isnull=False).exists())
+        login = self.client.post("/api/v1/auth/login/", data=json.dumps({"identifier": self.user.username, "password": "StrongerPass123!"}), content_type="application/json")
+        self.assertEqual(login.status_code, 403)
         cancelled = self.client.delete("/api/v1/account-deletion/", **self.auth())
         self.assertEqual(cancelled.status_code, 200, cancelled.content)
         self.assertEqual(AccountDeletionRequest.objects.get(user=self.user).status, AccountDeletionRequest.STATUS_CANCELLED)
@@ -1298,4 +1302,3 @@ class PhaseEightProductionReadinessTests(TestCase):
         if result["status"] == "skipped":
             self.assertEqual(result["reason"], "ffmpeg_unavailable")
             self.assertTrue(OperationalEvent.objects.filter(event_type="media_processing_unavailable").exists())
-

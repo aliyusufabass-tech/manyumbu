@@ -1,6 +1,8 @@
 import json
 from datetime import timedelta
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -48,6 +50,7 @@ from .post_services import can_access_post
 from .phase4_services import can_access_reel, can_access_story
 from .profile_views import AuthenticatedView, compact_user, get_target, page
 from .views import body, response
+from .storage import absolute_media_url
 
 
 def parse_payload(request):
@@ -68,6 +71,24 @@ def get_conversation_or_404(user, conversation_id):
     if not ConversationParticipant.objects.filter(conversation=conversation, user=user).exists():
         raise PermissionError("You are not a participant in this conversation.")
     return conversation
+
+
+def broadcast_conversation_message(conversation_id, message, viewer, request_id=""):
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+    async_to_sync(channel_layer.group_send)(
+        f"conversation.{conversation_id}",
+        {
+            "type": "relay.event",
+            "payload": {
+                "event": "message.created",
+                "version": 1,
+                "data": {"message": message_payload(message, viewer)},
+                "request_id": request_id or None,
+            },
+        },
+    )
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -230,6 +251,8 @@ class ConversationMessagesView(AuthenticatedView):
             conversation = get_conversation_or_404(request.user_obj, conversation_id)
             payload = parse_payload(request)
             msg, created = create_message(request.user_obj, conversation, payload, request.FILES.getlist("attachments") or request.FILES.getlist("attachment"))
+            if created:
+                broadcast_conversation_message(conversation.id, msg, request.user_obj, payload.get("client_message_id", ""))
             return response(True, "Message sent successfully.", {"message": message_payload(msg, request.user_obj), "deduplicated": not created}, status=201 if created else 200)
         except (Conversation.DoesNotExist, Message.DoesNotExist):
             return response(False, "Conversation or reply message was not found.", status=404)
@@ -378,7 +401,7 @@ class SharedMediaView(AuthenticatedView):
             qs = MessageAttachment.objects.filter(message_id__in=messages).select_related("message", "message__sender").order_by("-created_at")
             if kind:
                 qs = qs.filter(kind=kind)
-            return response(True, "Shared media loaded.", page(request, qs, lambda item: {"message_id": str(item.message_id), "sender": compact_user(item.message.sender, request.user_obj), "attachment": {"id": str(item.id), "kind": item.kind, "file_name": item.file_name, "url": item.file.url if item.file else "", "file_size": item.file_size, "created_at": item.created_at.isoformat()}}))
+            return response(True, "Shared media loaded.", page(request, qs, lambda item: {"message_id": str(item.message_id), "sender": compact_user(item.message.sender, request.user_obj), "attachment": {"id": str(item.id), "kind": item.kind, "file_name": item.file_name, "url": absolute_media_url(item.file) or "", "file_size": item.file_size, "created_at": item.created_at.isoformat()}}))
         except Conversation.DoesNotExist:
             return response(False, "Conversation was not found.", status=404)
         except PermissionError as exc:

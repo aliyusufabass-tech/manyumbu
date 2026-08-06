@@ -1,43 +1,58 @@
 {
-  "expo": {
-    "name": "Manyumbu",
-    "slug": "manyumbu",
-    "scheme": "manyumbu",
-    "version": "0.1.0",
-    "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
-    "android": {
-      "package": "com.manyumbu.app",
-      "permissions": [
-        "CAMERA",
-        "RECORD_AUDIO",
-        "BLUETOOTH",
-        "BLUETOOTH_CONNECT",
-        "POST_NOTIFICATIONS",
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_MICROPHONE",
-        "FOREGROUND_SERVICE_CAMERA"
-      ]
-    },
-    "ios": {
-      "infoPlist": {
-        "NSCameraUsageDescription": "Manyumbu uses the camera for video calls when you choose to enable it.",
-        "NSMicrophoneUsageDescription": "Manyumbu uses the microphone for voice and video calls.",
-        "UIBackgroundModes": [
-          "audio",
-          "voip"
-        ]
-      }
-    },
-    "plugins": [
-      "expo-router",
-      "expo-secure-store"
-    ],
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "1cadc1dc-7cc0-4af6-8c7a-970048653fe6"
-      }
-    }
-  }
+    "expo":  {
+                 "name":  "Manyumbu",
+                 "slug":  "manyumbu",
+                 "scheme":  "manyumbu",
+                 "version":  "0.1.0",
+                 "orientation":  "portrait",
+                 "userInterfaceStyle":  "automatic",
+                 "android":  {
+                                 "package":  "com.manyumbu.app",
+                                 "permissions":  [
+                                                     "CAMERA",
+                                                     "READ_MEDIA_IMAGES",
+                                                     "READ_MEDIA_VIDEO",
+                                                     "READ_EXTERNAL_STORAGE",
+                                                     "RECORD_AUDIO",
+                                                     "BLUETOOTH",
+                                                     "BLUETOOTH_CONNECT",
+                                                     "POST_NOTIFICATIONS",
+                                                     "FOREGROUND_SERVICE",
+                                                     "FOREGROUND_SERVICE_MICROPHONE",
+                                                     "FOREGROUND_SERVICE_CAMERA"
+                                                 ]
+                             },
+                 "ios":  {
+                             "infoPlist":  {
+                                               "NSCameraUsageDescription":  "Manyumbu uses the camera for video calls, stories, reels, posts, and profile photos when you choose to enable it.",
+                                               "NSPhotoLibraryUsageDescription":  "Manyumbu uses your photo library so you can upload posts, stories, reels, attachments, and profile photos.",
+                                               "NSPhotoLibraryAddUsageDescription":  "Manyumbu can save media you choose from the app to your library.",
+                                               "NSMicrophoneUsageDescription":  "Manyumbu uses the microphone for voice and video calls.",
+                                               "UIBackgroundModes":  [
+                                                                         "audio",
+                                                                         "voip"
+                                                                     ]
+                                           }
+                         },
+                 "plugins":  [
+                                 "expo-router",
+                                 "expo-secure-store",
+                                 [
+                                     "expo-image-picker",
+                                     {
+                                         "cameraPermission":  "Manyumbu uses the camera when you choose to capture posts, stories, reels, or profile photos.",
+                                         "photosPermission":  "Manyumbu uses your photo library so you can upload posts, stories, reels, attachments, and profile photos.",
+                                         "microphonePermission":  "Manyumbu uses the microphone when you record videos, voice notes, and calls."
+                                     }
+                                 ]
+                             ],
+                 "extra":  {
+                               "router":  {
+
+                                          },
+                               "eas":  {
+                                           "projectId":  "1cadc1dc-7cc0-4af6-8c7a-970048653fe6"
+                                       }
+                           }
+             }
 }

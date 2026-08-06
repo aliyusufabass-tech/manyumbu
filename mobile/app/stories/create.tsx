@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import { useMemo, useState } from "react";
 import { Image, Modal, Pressable, SafeAreaView, ScrollView, Text, TextInput, View } from "react-native";
 import { createStory } from "../../src/api/phase4";
+import { ensureMediaPermission } from "../../src/media/permissions";
 import { AppHeader } from "../../src/components/AppHeader";
 import { PrimaryButton } from "../../src/components/PrimaryButton";
 import { colors } from "../../src/theme/theme";
@@ -32,9 +33,10 @@ export default function StoryComposer() {
   const [progress, setProgress] = useState(0);
   const selectedAudience = audiences.find((item) => item.value === audience) ?? audiences[0];
   const errors = useMemo(() => validateStoryDraft({ text: caption, media }), [caption, media]);
-  const mutation = useMutation({ mutationFn: () => createStory({ caption, audience, background_style: media ? undefined : "mint", media }, setProgress), onSuccess: () => { client.invalidateQueries({ queryKey: ["stories"] }); router.replace("/(tabs)/home"); } });
+  const mutation = useMutation({ mutationFn: () => createStory({ caption, audience, background_style: media ? undefined : "mint", media }, setProgress), onSuccess: () => { client.invalidateQueries({ queryKey: ["stories"] }); client.invalidateQueries({ queryKey: ["profile"] }); router.replace("/(tabs)/home"); } });
 
   async function pick(source: "camera" | "gallery") {
+    if (!(await ensureMediaPermission(source))) return;
     const result = source === "camera"
       ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, quality: 0.82 })
       : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, quality: 0.82 });

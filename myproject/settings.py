@@ -5,6 +5,21 @@ from urllib.parse import urlparse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+def load_local_env(path):
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+load_local_env(BASE_DIR / ".env")
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-only-manyumbu-secret-key-change-me")
 DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",") if host.strip()]
@@ -89,7 +104,7 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_URL = "media/"
+MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -100,6 +115,8 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "1") == "1"
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "Manyumbu <no-reply@manyumbu.local>")
+EMAIL_FILE_PATH = os.getenv("EMAIL_FILE_PATH", str(BASE_DIR / "dev-emails"))
+SKIP_EMAIL_VERIFICATION = os.getenv("SKIP_EMAIL_VERIFICATION", "True").lower() == "true"
 
 MANYUMBU_ACCESS_TOKEN_LIFETIME = timedelta(minutes=int(os.getenv("ACCESS_TOKEN_MINUTES", "15")))
 MANYUMBU_REFRESH_TOKEN_LIFETIME = timedelta(days=int(os.getenv("REFRESH_TOKEN_DAYS", "7")))
@@ -107,7 +124,8 @@ MANYUMBU_REFRESH_TOKEN_LIFETIME = timedelta(days=int(os.getenv("REFRESH_TOKEN_DA
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
-CSRF_TRUSTED_ORIGINS = [origin for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if origin]
+EXPO_DEV_ORIGINS = ["http://localhost:8081", "http://127.0.0.1:8081", "http://localhost:19006", "http://127.0.0.1:19006"]
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.getenv("CSRF_TRUSTED_ORIGINS", ",".join(EXPO_DEV_ORIGINS[:2])).split(",") if origin.strip()]
 
 REDIS_URL = os.getenv("REDIS_URL", "")
 if REDIS_URL:
@@ -139,8 +157,17 @@ CORS_ALLOW_CREDENTIALS = True
 MANYUMBU_PUBLIC_APP_URL = os.getenv("MANYUMBU_PUBLIC_APP_URL", "")
 MANYUMBU_ADMIN_URL = os.getenv("MANYUMBU_ADMIN_URL", "")
 MANYUMBU_API_URL = os.getenv("MANYUMBU_API_URL", "")
-MANYUMBU_MEDIA_PROVIDER = os.getenv("MANYUMBU_MEDIA_PROVIDER", "local")
+MANYUMBU_MEDIA_PROVIDER = os.getenv("MANYUMBU_MEDIA_PROVIDER", "local").lower()
 MANYUMBU_STORAGE_BUCKET = os.getenv("MANYUMBU_STORAGE_BUCKET", "")
+CLOUDINARY_FOLDER = os.getenv("CLOUDINARY_FOLDER", "manyumbu")
+STORAGES = {
+    "default": {
+        "BACKEND": "manyumbu10.storage.CloudinaryMediaStorage" if MANYUMBU_MEDIA_PROVIDER == "cloudinary" else "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 MANYUMBU_PUSH_PROVIDER = os.getenv("MANYUMBU_PUSH_PROVIDER", "expo")
 MANYUMBU_PUSH_ENABLED = os.getenv("MANYUMBU_PUSH_ENABLED", "0") == "1"
 MANYUMBU_DELETION_GRACE_DAYS = int(os.getenv("MANYUMBU_DELETION_GRACE_DAYS", "30"))

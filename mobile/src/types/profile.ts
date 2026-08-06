@@ -29,6 +29,20 @@ export type PrivacySettings = {
   dob_visibility: "hidden" | "month_day" | "full";
   profile_details_public: boolean;
   online_status_visible: boolean;
+  who_can_message_me: string;
+  who_can_add_to_conversations: string;
+  show_online_status: string;
+  show_last_seen: string;
+  send_read_receipts: boolean;
+  show_typing_indicator: boolean;
+  show_recording_indicator: boolean;
+  allow_message_requests: boolean;
+  allow_forwarded_messages_from_unknown_users: boolean;
+  who_can_call_me: string;
+  allow_voice_calls: boolean;
+  allow_video_calls: boolean;
+  show_call_notifications: boolean;
+  silence_calls_from_unknown_users: boolean;
 };
 
 export type Paginated<T> = {

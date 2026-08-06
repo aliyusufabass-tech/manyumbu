@@ -25,6 +25,7 @@ from .models import (
     UserPresence,
 )
 from .profile_views import compact_user
+from .storage import absolute_media_url
 from .services import ensure_profile_records, users_blocked_between
 
 MAX_TEXT_LENGTH = 5000
@@ -217,8 +218,8 @@ def create_message(sender, conversation, payload, files=None):
 
 
 def attachment_payload(attachment):
-    url = attachment.file.url if attachment.file else ""
-    return {"id": str(attachment.id), "kind": attachment.kind, "url": url, "file_name": attachment.file_name, "mime_type": attachment.mime_type, "file_size": attachment.file_size, "width": attachment.width, "height": attachment.height, "duration": attachment.duration, "thumbnail": attachment.thumbnail.url if attachment.thumbnail else None, "waveform": attachment.waveform, "processing_status": attachment.processing_status, "malware_scan_status": attachment.malware_scan_status}
+    url = absolute_media_url(attachment.file) or ""
+    return {"id": str(attachment.id), "kind": attachment.kind, "url": url, "file_name": attachment.file_name, "mime_type": attachment.mime_type, "file_size": attachment.file_size, "width": attachment.width, "height": attachment.height, "duration": attachment.duration, "thumbnail": absolute_media_url(attachment.thumbnail), "waveform": attachment.waveform, "processing_status": attachment.processing_status, "malware_scan_status": attachment.malware_scan_status}
 
 
 def message_payload(message, viewer):
@@ -331,4 +332,3 @@ def report_context(message=None, conversation=None):
     if conversation:
         return {"conversation": str(conversation.id), "recent": [item(row) for row in conversation.messages.select_related("sender").order_by("-created_at")[:5]]}
     return {}
-

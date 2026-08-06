@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import { useMemo, useState } from "react";
 import { Image, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { createPost } from "../../src/api/posts";
+import { ensureMediaPermission } from "../../src/media/permissions";
 import { validateComposerDraft } from "../../src/posts/composerValidation";
 
 const audiences = ["public", "followers", "close_friends", "selected", "only_me"];
@@ -22,16 +23,20 @@ export default function CreatePostScreen() {
     mutationFn: (status: "draft" | "published") => createPost({ caption, location_name: location, audience, comments_enabled: commentsEnabled, media, status }, setProgress),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: ["feed"] });
+      client.invalidateQueries({ queryKey: ["user-posts"] });
+      client.invalidateQueries({ queryKey: ["profile"] });
       router.replace("/feed");
     },
   });
 
-  async function pick(kind: "image" | "video") {
-    const result = await ImagePicker.launchImageLibraryAsync({
+  async function pick(kind: "image" | "video", source: "camera" | "gallery") {
+    if (!(await ensureMediaPermission(source))) return;
+    const options: ImagePicker.ImagePickerOptions = {
       mediaTypes: kind === "image" ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos,
-      allowsMultipleSelection: kind === "image",
+      allowsMultipleSelection: source === "gallery" && kind === "image",
       quality: 0.82,
-    });
+    };
+    const result = source === "camera" ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
     if (!result.canceled) {
       setMedia(result.assets.map((asset) => ({
         uri: asset.uri,
@@ -57,9 +62,10 @@ export default function CreatePostScreen() {
       <Pressable onPress={() => setCommentsEnabled((value) => !value)}>
         <Text style={{ color: "#126C57", fontWeight: "800" }}>{commentsEnabled ? "Comments enabled" : "Comments disabled"}</Text>
       </Pressable>
-      <View style={{ flexDirection: "row", gap: 10 }}>
-        <Pressable onPress={() => pick("image")} style={{ borderWidth: 1, borderColor: "#126C57", padding: 12, borderRadius: 8 }}><Text style={{ color: "#126C57", fontWeight: "800" }}>Pick images</Text></Pressable>
-        <Pressable onPress={() => pick("video")} style={{ borderWidth: 1, borderColor: "#126C57", padding: 12, borderRadius: 8 }}><Text style={{ color: "#126C57", fontWeight: "800" }}>Pick video</Text></Pressable>
+      <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+        <Pressable onPress={() => pick("image", "gallery")} style={{ borderWidth: 1, borderColor: "#126C57", padding: 12, borderRadius: 8 }}><Text style={{ color: "#126C57", fontWeight: "800" }}>Pick images</Text></Pressable>
+        <Pressable onPress={() => pick("video", "gallery")} style={{ borderWidth: 1, borderColor: "#126C57", padding: 12, borderRadius: 8 }}><Text style={{ color: "#126C57", fontWeight: "800" }}>Pick video</Text></Pressable>
+        <Pressable onPress={() => pick("image", "camera")} style={{ borderWidth: 1, borderColor: "#126C57", padding: 12, borderRadius: 8 }}><Text style={{ color: "#126C57", fontWeight: "800" }}>Camera</Text></Pressable>
       </View>
       {media.map((item, index) => (
         <View key={item.uri} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>

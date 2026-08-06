@@ -1,15 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, Share, Text, View, useWindowDimensions } from "react-native";
+import { ResizeMode, Video } from "expo-av";
+import { Image, Pressable, Share, Text, View, useWindowDimensions } from "react-native";
 import type { Reel } from "../types/phase4";
 import { Avatar } from "./Avatar";
 
-export function ReelCard({ reel, onLike, onSave }: { reel: Reel; onLike?: () => void; onSave?: () => void }) {
+export function ReelCard({ reel, active, onLike, onSave }: { reel: Reel; active?: boolean; onLike?: () => void; onSave?: () => void }) {
   const { height } = useWindowDimensions();
+  const playable = reel.processing_status === "ready" && Boolean(reel.video_url);
   return (
     <View style={{ height: Math.max(620, height - 70), backgroundColor: "#101816", padding: 20, justifyContent: "flex-end" }}>
       <View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", backgroundColor: "#101816" }}>
-        <Ionicons name={reel.processing_status === "ready" ? "play-circle" : "hourglass-outline"} size={78} color="white" />
-        <Text style={{ color: "rgba(255,255,255,.82)", marginTop: 10, fontWeight: "800" }}>{reel.processing_status === "ready" ? "Tap to play" : "Preparing video"}</Text>
+        {playable ? <Video source={{ uri: reel.video_url }} shouldPlay={Boolean(active)} isLooping resizeMode={ResizeMode.COVER} useNativeControls={false} style={{ width: "100%", height: "100%" }} /> : reel.thumbnail_url ? <Image source={{ uri: reel.thumbnail_url }} resizeMode="cover" style={{ width: "100%", height: "100%" }} /> : null}
+        {!playable ? <><Ionicons name={reel.processing_status === "ready" ? "play-circle" : "hourglass-outline"} size={78} color="white" /><Text style={{ color: "rgba(255,255,255,.82)", marginTop: 10, fontWeight: "800" }}>{reel.processing_status === "ready" ? "Video unavailable" : "Preparing video"}</Text></> : null}
       </View>
       <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 16 }}>
         <View style={{ flex: 1, gap: 10 }}>

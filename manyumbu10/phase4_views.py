@@ -14,6 +14,7 @@ from .phase4_services import can_access_reel, can_access_story, create_reel, cre
 from .post_services import clean_text, create_notification
 from .profile_views import AuthenticatedView, compact_user, page
 from .views import body, response
+from .storage import absolute_media_url
 
 
 def parse_payload(request):
@@ -36,11 +37,11 @@ def story_payload(story, viewer):
     if poll:
         total = poll.votes.count()
         poll_data = {"id": poll.id, "question": poll.question, "total_votes": total, "options": [{"id": opt.id, "text": opt.text, "votes": opt.votes.count(), "percentage": round((opt.votes.count() / total) * 100, 1) if total else 0} for opt in poll.options.order_by("display_order")]}
-    return {"id": str(story.id), "author": compact_user(story.author, viewer), "story_type": story.story_type, "caption": story.caption, "audience": story.audience if story.author == viewer else None, "background_style": story.background_style, "link_url": story.link_url, "location_name": story.location_name, "sticker_metadata": story.sticker_metadata, "replies_enabled": story.replies_enabled, "status": story.status, "published_at": story.published_at.isoformat() if story.published_at else None, "expires_at": story.expires_at.isoformat() if story.expires_at else None, "media": {"url": media.file.url, "media_type": media.media_type, "file_size": media.file_size} if media and media.file else None, "hashtags": [link.hashtag.display_name for link in story.hashtags.all()], "mentions": [compact_user(link.user, viewer) for link in story.mentions.all()], "view_count": story.views.count(), "viewer_has_viewed": StoryView.objects.filter(story=story, viewer=viewer).exists(), "reaction": getattr(StoryReaction.objects.filter(story=story, user=viewer).first(), "reaction", None), "poll": poll_data}
+    return {"id": str(story.id), "author": compact_user(story.author, viewer), "story_type": story.story_type, "caption": story.caption, "audience": story.audience if story.author == viewer else None, "background_style": story.background_style, "link_url": story.link_url, "location_name": story.location_name, "sticker_metadata": story.sticker_metadata, "replies_enabled": story.replies_enabled, "status": story.status, "published_at": story.published_at.isoformat() if story.published_at else None, "expires_at": story.expires_at.isoformat() if story.expires_at else None, "media": {"url": absolute_media_url(media.file) or media.media_url, "secure_url": media.secure_url or absolute_media_url(media.file) or media.media_url, "media_type": media.media_type, "file_size": media.file_size, "thumbnail": absolute_media_url(media.thumbnail)} if media and media.file else None, "hashtags": [link.hashtag.display_name for link in story.hashtags.all()], "mentions": [compact_user(link.user, viewer) for link in story.mentions.all()], "view_count": story.views.count(), "viewer_has_viewed": StoryView.objects.filter(story=story, viewer=viewer).exists(), "reaction": getattr(StoryReaction.objects.filter(story=story, user=viewer).first(), "reaction", None), "poll": poll_data}
 
 
 def reel_payload(reel, viewer):
-    return {"id": str(reel.id), "author": compact_user(reel.author, viewer), "caption": reel.caption, "audience": reel.audience if reel.author == viewer else None, "comments_enabled": reel.comments_enabled, "status": reel.status, "processing_status": reel.processing_status, "location_name": reel.location_name, "video_url": reel.video.url if reel.video else reel.video_url, "thumbnail_url": reel.cover_image.url if reel.cover_image else reel.thumbnail_url, "duration": reel.duration, "width": reel.width, "height": reel.height, "aspect_ratio": reel.aspect_ratio, "view_count": reel.view_count, "share_count": reel.share_count, "published_at": reel.published_at.isoformat() if reel.published_at else None, "hashtags": [link.hashtag.display_name for link in reel.hashtags.all()], "mentions": [compact_user(link.user, viewer) for link in reel.mentions.all()], "tagged_users": [compact_user(link.user, viewer) for link in reel.tagged_users.all()], "like_count": getattr(reel, "like_total", reel.likes.count()), "comment_count": getattr(reel, "comment_total", reel.comments.filter(is_deleted=False).count()), "viewer_has_liked": ReelLike.objects.filter(reel=reel, user=viewer).exists(), "viewer_has_saved": SavedReel.objects.filter(reel=reel, user=viewer).exists(), "permissions": {"can_edit": reel.author == viewer, "can_delete": reel.author == viewer, "can_archive": reel.author == viewer, "can_comment": reel.comments_enabled and can_access_reel(viewer, reel)}}
+    return {"id": str(reel.id), "author": compact_user(reel.author, viewer), "caption": reel.caption, "audience": reel.audience if reel.author == viewer else None, "comments_enabled": reel.comments_enabled, "status": reel.status, "processing_status": reel.processing_status, "location_name": reel.location_name, "video_url": absolute_media_url(reel.video) or reel.video_url, "thumbnail_url": absolute_media_url(reel.cover_image) or reel.thumbnail_url, "duration": reel.duration, "width": reel.width, "height": reel.height, "aspect_ratio": reel.aspect_ratio, "view_count": reel.view_count, "share_count": reel.share_count, "published_at": reel.published_at.isoformat() if reel.published_at else None, "hashtags": [link.hashtag.display_name for link in reel.hashtags.all()], "mentions": [compact_user(link.user, viewer) for link in reel.mentions.all()], "tagged_users": [compact_user(link.user, viewer) for link in reel.tagged_users.all()], "like_count": getattr(reel, "like_total", reel.likes.count()), "comment_count": getattr(reel, "comment_total", reel.comments.filter(is_deleted=False).count()), "viewer_has_liked": ReelLike.objects.filter(reel=reel, user=viewer).exists(), "viewer_has_saved": SavedReel.objects.filter(reel=reel, user=viewer).exists(), "permissions": {"can_edit": reel.author == viewer, "can_delete": reel.author == viewer, "can_archive": reel.author == viewer, "can_comment": reel.comments_enabled and can_access_reel(viewer, reel)}}
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -166,7 +167,7 @@ class HighlightListView(AuthenticatedView):
     def get(self, request, username):
         owner = get_user_model().objects.get(username__iexact=username)
         qs = StoryHighlight.objects.filter(owner=owner).order_by("display_order", "created_at")
-        return response(True, "Highlights loaded.", page(request, qs, lambda h: {"id": str(h.id), "title": h.title, "cover_image": h.cover_image.url if h.cover_image else None, "story_count": h.items.count()}))
+        return response(True, "Highlights loaded.", page(request, qs, lambda h: {"id": str(h.id), "title": h.title, "cover_image": absolute_media_url(h.cover_image), "story_count": h.items.count()}))
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -403,4 +404,3 @@ class AdminStoryReelView(AuthenticatedView):
             return response(True, "Moderation action recorded.")
         except PermissionError as exc:
             return response(False, str(exc), status=403)
-

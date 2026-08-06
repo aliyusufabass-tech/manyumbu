@@ -1,5 +1,6 @@
 import { api } from "./client";
 import type { ApiResponse, AuthTokens, ManyumbuUser } from "../types/auth";
+import { getTokenItem } from "../store/tokenStorage";
 
 export type RegisterPayload = {
   full_name: string;
@@ -42,5 +43,20 @@ export async function login(identifier: string, password: string) {
 
 export async function forgotPassword(identifier: string) {
   const { data } = await api.post<ApiResponse<Record<string, never>>>("/auth/forgot-password/", { identifier });
+  return data;
+}
+
+async function authHeader() {
+  const token = await getTokenItem("manyumbu_access");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export async function changePassword(payload: { current_password: string; password: string; confirm_password: string }) {
+  const { data } = await api.post<ApiResponse<Record<string, never>>>("/auth/change-password/", payload, { headers: await authHeader() });
+  return data;
+}
+
+export async function requestAccountDeletion(payload: { reason?: string; recent_auth_confirmed: boolean }) {
+  const { data } = await api.post<ApiResponse<{ deletion_request: { id: string; status: string; grace_period_ends_at: string } }>>("/account-deletion/", payload, { headers: await authHeader() });
   return data;
 }

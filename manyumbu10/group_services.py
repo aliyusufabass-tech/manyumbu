@@ -11,6 +11,7 @@ from .models import (
     AdminAnnouncement, Group, GroupArchive, GroupAuditLog, GroupBan, GroupClearState, GroupInvitation, GroupJoinRequest, GroupMember, GroupMessage, GroupSettings, GroupMessageAttachment, GroupMessageDeletion, GroupMessageDeliveryReceipt, GroupMessagePin, GroupMessageReaction, GroupMessageReadReceipt, GroupMessageReport, GroupMessageStar, GroupMute, GroupReport, GroupRestriction, Message, MessageAttachment, Notification, NotificationBatch, NotificationDelivery, NotificationPreference, PushNotificationDelivery, UserDevice,
 )
 from .profile_views import compact_user
+from .storage import absolute_media_url
 from .services import hash_token, users_blocked_between
 
 ROLE_RANK = {Group.ROLE_MEMBER: 1, Group.ROLE_MODERATOR: 2, Group.ROLE_ADMIN: 3, Group.ROLE_OWNER: 4}
@@ -240,7 +241,7 @@ def create_system_message(group, actor, text):
 
 def group_payload(group, viewer):
     member = active_member(group, viewer)
-    return {"id": str(group.id), "name": group.name, "description": group.description, "image": group.image.url if group.image else None, "owner": compact_user(group.owner, viewer), "privacy": group.privacy, "member_count": group.member_count, "maximum_members": group.maximum_members, "status": group.status, "viewer_role": member.role if member else None, "viewer_can_send": bool(member and can_send(group, viewer, raise_error=False)), "muted_until": member.muted_until.isoformat() if member and member.muted_until else None, "archived": bool(member and member.archived_at), "last_message_at": group.last_message_at.isoformat() if group.last_message_at else None, "settings": {"who_can_join": group.who_can_join, "who_can_send_messages": group.who_can_send_messages, "who_can_add_members": group.who_can_add_members, "who_can_pin_messages": group.who_can_pin_messages, "who_can_mention_everyone": group.who_can_mention_everyone}, "created_at": group.created_at.isoformat(), "updated_at": group.updated_at.isoformat()}
+    return {"id": str(group.id), "name": group.name, "description": group.description, "image": absolute_media_url(group.image), "owner": compact_user(group.owner, viewer), "privacy": group.privacy, "member_count": group.member_count, "maximum_members": group.maximum_members, "status": group.status, "viewer_role": member.role if member else None, "viewer_can_send": bool(member and can_send(group, viewer, raise_error=False)), "muted_until": member.muted_until.isoformat() if member and member.muted_until else None, "archived": bool(member and member.archived_at), "last_message_at": group.last_message_at.isoformat() if group.last_message_at else None, "settings": {"who_can_join": group.who_can_join, "who_can_send_messages": group.who_can_send_messages, "who_can_add_members": group.who_can_add_members, "who_can_pin_messages": group.who_can_pin_messages, "who_can_mention_everyone": group.who_can_mention_everyone}, "created_at": group.created_at.isoformat(), "updated_at": group.updated_at.isoformat()}
 
 
 def can_send(group, user, raise_error=True):
@@ -354,4 +355,3 @@ def mark_group_read(group, user, message=None):
     if message:
         GroupMessageReadReceipt.objects.get_or_create(message=message, user=user)
     return member
-

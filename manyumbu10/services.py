@@ -14,7 +14,7 @@ from django.db.models import F
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from .models import EmailVerificationCode, PasswordResetCode, UserProfile, UserSession, normalize_phone_number
+from .models import AccountDeletionRequest, EmailVerificationCode, PasswordResetCode, UserProfile, UserSession, normalize_phone_number
 
 MAX_CODE_ATTEMPTS = 5
 
@@ -155,6 +155,8 @@ def authenticate_identifier(identifier: str, password: str):
             user = User.objects.filter(username__iexact=lookup).first()
     if not user or not user.check_password(password):
         return None
+    if AccountDeletionRequest.objects.filter(user=user, status=AccountDeletionRequest.STATUS_REQUESTED).exists():
+        raise PermissionError("This account is scheduled for deletion and cannot be used to sign in.")
     return user
 
 

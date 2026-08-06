@@ -12,6 +12,7 @@ from .group_services import active_member, add_group_member, audit, create_group
 from .models import AdminAnnouncement, AdminAuditLog, Group, GroupArchive, GroupBan, GroupClearState, GroupInvitation, GroupJoinRequest, GroupMember, GroupMessage, GroupMessageAttachment, GroupMessageDeletion, GroupMessageDeliveryReceipt, GroupMessagePin, GroupMessageReaction, GroupMessageReport, GroupMessageStar, GroupMute, GroupReport, GroupRestriction, Notification, NotificationPreference
 from .profile_views import AuthenticatedView, compact_user, get_target, page
 from .views import body, response
+from .storage import absolute_media_url
 
 
 def parse_payload(request):
@@ -213,7 +214,7 @@ class GroupSearchMediaView(AuthenticatedView):
                 q = request.GET.get("q", ""); qs = group_message_queryset(request.user_obj, group).filter(Q(text__icontains=q) | Q(attachments__file_name__icontains=q)).distinct().order_by("-created_at")
                 return response(True, "Group search loaded.", page(request, qs, lambda m: group_message_payload(m, request.user_obj)))
             ids = group_message_queryset(request.user_obj, group).values_list("id", flat=True); qs = GroupMessageAttachment.objects.filter(message_id__in=ids).select_related("message", "message__sender").order_by("-created_at")
-            return response(True, "Group shared media loaded.", page(request, qs, lambda a: {"message_id": str(a.message_id), "kind": a.kind, "file_name": a.file_name, "url": a.file.url if a.file else "", "file_size": a.file_size, "created_at": a.created_at.isoformat()}))
+            return response(True, "Group shared media loaded.", page(request, qs, lambda a: {"message_id": str(a.message_id), "kind": a.kind, "file_name": a.file_name, "url": absolute_media_url(a.file) or "", "file_size": a.file_size, "created_at": a.created_at.isoformat()}))
         except Exception as exc: return response(False, str(exc), status=403)
 
 
@@ -322,4 +323,3 @@ class AdminGroupModerationView(AuthenticatedView):
                 return response(True, "Announcement sent.", {"announcement_id": ann.id})
             return response(False, "Unknown admin group action.", status=400)
         except Exception as exc: return response(False, str(exc), status=403)
-

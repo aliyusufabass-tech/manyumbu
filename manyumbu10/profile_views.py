@@ -2,6 +2,7 @@ import json
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.utils.dateparse import parse_date
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils.decorators import method_decorator
@@ -25,6 +26,7 @@ from .services import (
     users_blocked_between,
 )
 from .views import body, public_user, response
+from .storage import absolute_media_url
 
 
 def current_user(request):
@@ -65,8 +67,8 @@ def profile_payload(user, viewer=None, include_private=False):
     data = {
         "username": user.username,
         "full_name": user.full_name,
-        "profile_picture": user.profile_picture.url if user.profile_picture else None,
-        "cover_photo": profile.cover_photo.url if profile.cover_photo else None,
+        "profile_picture": absolute_media_url(user.profile_picture),
+        "cover_photo": absolute_media_url(profile.cover_photo),
         "bio": profile.bio if allowed else "",
         "website": profile.website if allowed and privacy.profile_details_public else "",
         "location": profile.location if allowed and privacy.profile_details_public else "",
@@ -99,7 +101,7 @@ def compact_user(user, viewer=None):
     return {
         "username": user.username,
         "full_name": user.full_name,
-        "profile_picture": user.profile_picture.url if user.profile_picture else None,
+        "profile_picture": absolute_media_url(user.profile_picture),
         "is_private": user.profile.is_private,
         "is_verified": user.is_verified,
         "is_following": is_following(viewer, user) if viewer else False,
@@ -139,6 +141,18 @@ class MeProfileView(AuthenticatedView):
                 if get_user_model().objects.exclude(phone_number=user.phone_number).filter(username=username).exists():
                     return response(False, "Username is already taken.", status=409)
                 user.username = username
+            if "email" in payload:
+                email = get_user_model().objects.normalize_email(str(payload["email"]).strip())
+                if get_user_model().objects.exclude(phone_number=user.phone_number).filter(email__iexact=email).exists():
+                    return response(False, "Email is already taken.", status=409)
+                user.email = email
+            if "phone_number" in payload and normalize_phone_number(payload["phone_number"]) != user.phone_number:
+                return response(False, "Phone number changes are not supported for this account version. Contact support to migrate your phone number safely.", status=400)
+            if "date_of_birth" in payload:
+                parsed = parse_date(str(payload["date_of_birth"]))
+                if not parsed:
+                    return response(False, "date_of_birth must be YYYY-MM-DD.", status=400)
+                user.date_of_birth = parsed
             for field in ["full_name"]:
                 if field in payload:
                     setattr(user, field, payload[field].strip())

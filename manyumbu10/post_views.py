@@ -13,6 +13,7 @@ from .models import Comment, CommentLike, HiddenPost, Notification, Post, PostLi
 from .post_services import can_access_post, clean_text, create_notification, create_post, edit_post, visible_posts_for
 from .profile_views import AuthenticatedView, compact_user, current_user, page
 from .views import body, response
+from .storage import absolute_media_url
 
 
 def parse_payload(request):
@@ -33,7 +34,7 @@ def post_queryset():
 
 
 def media_payload(media):
-    url = media.file.url if media.file else media.media_url
+    url = absolute_media_url(media.file) or media.media_url
     return {
         "id": str(media.id),
         "url": url,
@@ -44,7 +45,7 @@ def media_payload(media):
         "duration": media.duration,
         "file_size": media.file_size,
         "display_order": media.display_order,
-        "thumbnail": media.thumbnail.url if media.thumbnail else None,
+        "thumbnail": absolute_media_url(media.thumbnail),
         "upload_provider_id": media.upload_provider_id,
         "created_at": media.created_at.isoformat(),
     }
@@ -416,4 +417,3 @@ class AdminPostManagementView(AuthenticatedView):
             return response(False, str(exc), status=403)
         except Post.DoesNotExist:
             return response(False, "Post was not found.", status=404)
-
