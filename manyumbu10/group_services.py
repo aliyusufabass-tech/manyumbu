@@ -137,7 +137,10 @@ def add_group_member(group, actor, user, role=Group.ROLE_MEMBER, notify=True):
         raise PermissionError("Blocked users cannot be added.")
     if is_banned(group, user):
         raise PermissionError("Banned users cannot join this group.")
-    if group.member_count >= group.maximum_members and not active_member(group, user):
+    existing = active_member(group, user)
+    if existing:
+        raise ValueError("User is already a group member.")
+    if group.member_count >= group.maximum_members:
         raise ValueError("Group member limit has been reached.")
     member, created = GroupMember.objects.update_or_create(group=group, user=user, defaults={"role": role, "status": GroupMember.STATUS_ACTIVE})
     refresh_member_count(group)
@@ -146,6 +149,27 @@ def add_group_member(group, actor, user, role=Group.ROLE_MEMBER, notify=True):
     audit(group, actor, "member_added", user.username, {"role": role})
     return member
 
+
+
+@transaction.atomic
+def update_group_member_role(group, actor, user, new_role):
+    actor_member = require_member(group, actor)
+    target_member = require_member(group, user)
+    if new_role not in {Group.ROLE_MEMBER, Group.ROLE_MODERATOR, Group.ROLE_ADMIN}:
+        raise ValueError("Unsupported group role.")
+    if target_member.role == Group.ROLE_OWNER:
+        raise PermissionError("Owner role cannot be changed here.")
+    if actor_member.role != Group.ROLE_OWNER:
+        if not has_role(actor_member, Group.ROLE_ADMIN):
+            raise PermissionError("Only owners and admins can manage roles.")
+        if ROLE_RANK[actor_member.role] <= ROLE_RANK[target_member.role] or ROLE_RANK[actor_member.role] <= ROLE_RANK[new_role]:
+            raise PermissionError("Your role cannot change this member role.")
+    target_member.role = new_role
+    target_member.save(update_fields=["role", "updated_at"])
+    audit(group, actor, "member_role_updated", user.username, {"role": new_role})
+    if user != actor:
+        create_in_app_notification(user, actor, "group_role_changed", f"Your role in {group.name} is now {new_role}.", "group", group.id, {"group_id": str(group.id), "role": new_role})
+    return target_member
 
 @transaction.atomic
 def remove_group_member(group, actor, user):
@@ -330,3 +354,4 @@ def mark_group_read(group, user, message=None):
     if message:
         GroupMessageReadReceipt.objects.get_or_create(message=message, user=user)
     return member
+
