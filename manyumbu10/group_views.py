@@ -1,4 +1,6 @@
 import json
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.db.models import Q
@@ -6,7 +8,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from .group_services import active_member, add_group_member, audit, create_group, create_group_message, create_in_app_notification, create_invitation, group_message_payload, group_message_queryset, group_payload, join_by_invitation, leave_group, mark_group_read, refresh_member_count, remove_group_member, require_member, require_permission, transfer_ownership
+from .group_services import active_member, add_group_member, audit, create_group, create_group_message, create_in_app_notification, create_invitation, group_message_payload, group_message_queryset, group_payload, join_by_invitation, leave_group, mark_group_read, refresh_member_count, remove_group_member, require_member, require_permission, transfer_ownership, update_group_member_role
 from .models import AdminAnnouncement, AdminAuditLog, Group, GroupArchive, GroupBan, GroupClearState, GroupInvitation, GroupJoinRequest, GroupMember, GroupMessage, GroupMessageAttachment, GroupMessageDeletion, GroupMessageDeliveryReceipt, GroupMessagePin, GroupMessageReaction, GroupMessageReport, GroupMessageStar, GroupMute, GroupReport, GroupRestriction, Notification, NotificationPreference
 from .profile_views import AuthenticatedView, compact_user, get_target, page
 from .views import body, response
@@ -21,6 +23,24 @@ def parse_payload(request):
                 except Exception: payload[key] = [] if key in {"members", "initial_members", "waveform"} else {}
         return payload
     return body(request)
+
+
+def broadcast_group_message(group_id, message, viewer, request_id=""):
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+    async_to_sync(channel_layer.group_send)(
+        f"group.{group_id}",
+        {
+            "type": "relay.event",
+            "payload": {
+                "event": "group.message.created",
+                "version": 1,
+                "data": {"message": group_message_payload(message, viewer)},
+                "request_id": request_id or None,
+            },
+        },
+    )
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -78,10 +98,18 @@ class GroupMembersView(AuthenticatedView):
         except Exception as exc: return response(False, str(exc), status=403)
     def post(self, request, group_id):
         try:
-            group = Group.objects.get(id=group_id); payload = body(request); added = []
+            group = Group.objects.get(id=group_id); payload = body(request); added = []; skipped = []
             for ident in payload.get("members", [payload.get("username")]):
-                if ident: added.append(add_group_member(group, request.user_obj, get_target(ident)))
-            return response(True, "Members added.", {"members": [compact_user(m.user, request.user_obj) for m in added]})
+                if not ident:
+                    continue
+                target = get_target(ident)
+                try:
+                    added.append(add_group_member(group, request.user_obj, target))
+                except ValueError as exc:
+                    if "already a group member" not in str(exc):
+                        raise
+                    skipped.append({"username": target.username, "reason": "already_member"})
+            return response(True, "Members processed.", {"members": [{"user": compact_user(m.user, request.user_obj), "role": m.role, "joined_at": m.joined_at.isoformat()} for m in added], "skipped": skipped})
         except Exception as exc: return response(False, str(exc), status=403)
     def delete(self, request, group_id, user_identifier):
         try: remove_group_member(Group.objects.get(id=group_id), request.user_obj, get_target(user_identifier)); return response(True, "Member removed.")
@@ -95,10 +123,7 @@ class GroupMembershipActionView(AuthenticatedView):
             if action == "leave": leave_group(group, request.user_obj)
             elif action == "transfer-ownership": transfer_ownership(group, request.user_obj, get_target(payload.get("username", "")), password_confirmed=bool(payload.get("password_confirmed")))
             elif action == "roles":
-                require_permission(group, request.user_obj, "who_can_add_members"); member = require_member(group, get_target(payload.get("username", ""))); new_role = payload.get("role", Group.ROLE_MEMBER)
-                if new_role == Group.ROLE_OWNER: return response(False, "Use ownership transfer for owners.", status=400)
-                if member.role == Group.ROLE_OWNER: return response(False, "Owner role cannot be changed here.", status=403)
-                member.role = new_role; member.save(update_fields=["role", "updated_at"]); audit(group, request.user_obj, "member_role_updated", member.user.username, {"role": new_role})
+                update_group_member_role(group, request.user_obj, get_target(payload.get("username", "")), payload.get("role", Group.ROLE_MEMBER))
             elif action == "ban":
                 require_permission(group, request.user_obj, "who_can_add_members"); target = get_target(payload.get("username", ""))
                 if target == group.owner: return response(False, "Owner cannot be banned.", status=403)
@@ -135,7 +160,9 @@ class GroupMessagesView(AuthenticatedView):
         except Exception as exc: return response(False, str(exc), status=403)
     def post(self, request, group_id):
         try:
-            group = Group.objects.get(id=group_id); msg, created = create_group_message(group, request.user_obj, parse_payload(request), request.FILES.getlist("attachments") or request.FILES.getlist("attachment"))
+            group = Group.objects.get(id=group_id); payload = parse_payload(request); msg, created = create_group_message(group, request.user_obj, payload, request.FILES.getlist("attachments") or request.FILES.getlist("attachment"))
+            if created:
+                broadcast_group_message(group.id, msg, request.user_obj, payload.get("client_message_id", ""))
             return response(True, "Group message sent.", {"message": group_message_payload(msg, request.user_obj), "deduplicated": not created}, status=201 if created else 200)
         except Exception as exc: return response(False, str(exc), status=403 if isinstance(exc, PermissionError) else 400)
 
@@ -295,3 +322,4 @@ class AdminGroupModerationView(AuthenticatedView):
                 return response(True, "Announcement sent.", {"announcement_id": ann.id})
             return response(False, "Unknown admin group action.", status=400)
         except Exception as exc: return response(False, str(exc), status=403)
+

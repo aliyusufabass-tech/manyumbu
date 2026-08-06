@@ -1,14 +1,16 @@
 import json
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.core import mail
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from .models import EmailVerificationCode, normalize_phone_number
 
 
+@override_settings(SKIP_EMAIL_VERIFICATION=False)
 class PhaseOneAuthTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -51,6 +53,59 @@ class PhaseOneAuthTests(TestCase):
         self.assertFalse(user.is_email_verified)
         self.assertEqual(len(mail.outbox), 1)
         self.assertNotIn(self.latest_code(user), self.post_json("/api/v1/auth/register/", self.register_payload).content.decode())
+
+    @override_settings(SKIP_EMAIL_VERIFICATION=True)
+    def test_development_registration_activates_user_immediately(self):
+        response = self.post_json("/api/v1/auth/register/", self.register_payload)
+        self.assertEqual(response.status_code, 201, response.content)
+        user = get_user_model().objects.get(phone_number="+255714123456")
+        self.assertTrue(user.is_active)
+        self.assertTrue(user.is_email_verified)
+        self.assertIsNotNone(user.email_verified_at)
+
+    @override_settings(SKIP_EMAIL_VERIFICATION=True)
+    def test_development_registration_returns_tokens(self):
+        response = self.post_json("/api/v1/auth/register/", self.register_payload)
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()["data"]
+        self.assertFalse(data["requires_verification"])
+        self.assertIn("access", data)
+        self.assertIn("refresh", data)
+        self.assertEqual(data["user"]["phone_number"], "+255714123456")
+
+    @override_settings(SKIP_EMAIL_VERIFICATION=True)
+    def test_development_registration_does_not_create_verification_code(self):
+        self.post_json("/api/v1/auth/register/", self.register_payload)
+        user = get_user_model().objects.get(phone_number="+255714123456")
+        self.assertFalse(EmailVerificationCode.objects.filter(user=user).exists())
+
+    @override_settings(SKIP_EMAIL_VERIFICATION=True)
+    def test_development_registration_does_not_send_email(self):
+        with patch("manyumbu10.services.send_verification_email") as send_verification_email:
+            response = self.post_json("/api/v1/auth/register/", self.register_payload)
+        self.assertEqual(response.status_code, 201, response.content)
+        send_verification_email.assert_not_called()
+        self.assertEqual(len(mail.outbox), 0)
+
+    @override_settings(SKIP_EMAIL_VERIFICATION=False)
+    def test_production_registration_verification_flow_remains_unchanged(self):
+        response = self.post_json("/api/v1/auth/register/", self.register_payload)
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()["data"]
+        self.assertNotIn("access", data)
+        self.assertNotIn("refresh", data)
+        user = get_user_model().objects.get(phone_number="+255714123456")
+        self.assertFalse(user.is_active)
+        self.assertFalse(user.is_email_verified)
+        self.assertEqual(EmailVerificationCode.objects.filter(user=user).count(), 1)
+        self.assertEqual(len(mail.outbox), 1)
+
+    @override_settings(SKIP_EMAIL_VERIFICATION=True)
+    def test_login_works_immediately_after_development_registration(self):
+        self.post_json("/api/v1/auth/register/", self.register_payload)
+        response = self.post_json("/api/v1/auth/login/", {"identifier": "asha", "password": "StrongerPass123!"})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIn("refresh", response.json()["data"]["tokens"])
 
     def test_duplicate_phone_number_is_rejected(self):
         self.register_user()
@@ -853,7 +908,7 @@ class PhaseFiveWebSocketTests(TransactionTestCase):
         async_to_sync(self.unauthorized_flow)()
         async_to_sync(self.non_member_flow)()
 
-from .models import AdminAnnouncement, Group, GroupInvitation, GroupJoinRequest, GroupMember, GroupMessage, GroupMessageDeliveryReceipt, GroupMessagePin, GroupMessageReaction, GroupMessageReadReceipt, GroupMessageReport, GroupMessageStar, GroupReport, NotificationPreference, PushNotificationDelivery
+from .models import AdminAnnouncement, Group, GroupInvitation, GroupJoinRequest, GroupMember, GroupMessage, GroupMessageAttachment, GroupMessageDeliveryReceipt, GroupMessagePin, GroupMessageReaction, GroupMessageReadReceipt, GroupMessageReport, GroupMessageStar, GroupReport, NotificationPreference, PushNotificationDelivery
 
 
 class PhaseSixGroupNotificationTests(TestCase):
@@ -893,8 +948,12 @@ class PhaseSixGroupNotificationTests(TestCase):
         denied = self.post_json(f"/api/v1/groups/{group.id}/members/", {"username": "groupcaro"}, token=self.bob_token)
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(self.post_json(f"/api/v1/groups/{group.id}/roles/", {"username": "groupbob", "role": Group.ROLE_ADMIN}).status_code, 200)
-        allowed = self.post_json(f"/api/v1/groups/{group.id}/members/", {"username": "groupcaro"}, token=self.bob_token)
+        allowed = self.post_json(f"/api/v1/groups/{group.id}/members/", {"members": ["groupbob", "groupcaro"]}, token=self.bob_token)
         self.assertEqual(allowed.status_code, 200, allowed.content)
+        payload = allowed.json()["data"]
+        self.assertEqual([row["user"]["username"] for row in payload["members"]], ["groupcaro"])
+        self.assertEqual(payload["skipped"], [{"username": "groupbob", "reason": "already_member"}])
+        self.assertEqual(GroupMember.objects.filter(group=group, user=self.bob).count(), 1)
         self.assertEqual(GroupMember.objects.filter(group=group, status=GroupMember.STATUS_ACTIVE).count(), 3)
 
     def test_group_messages_actions_notifications_and_reports(self):
@@ -914,6 +973,11 @@ class PhaseSixGroupNotificationTests(TestCase):
         self.assertTrue(GroupMessagePin.objects.filter(message=msg, group=group).exists())
         self.assertTrue(GroupMessageDeliveryReceipt.objects.filter(message=msg, user=self.alice).exists())
         self.assertTrue(GroupMessageReadReceipt.objects.filter(message=msg, user=self.alice).exists())
+        voice = SimpleUploadedFile("group-voice.webm", b"audio", content_type="audio/webm")
+        voice_response = self.client.post(f"/api/v1/groups/{group.id}/messages/", {"message_type": "voice_note", "attachment_kind": "voice_note", "duration": "5", "attachments": [voice]}, **self.auth(self.bob_token))
+        self.assertEqual(voice_response.status_code, 201, voice_response.content)
+        voice_msg = GroupMessage.objects.get(id=voice_response.json()["data"]["message"]["id"])
+        self.assertTrue(GroupMessageAttachment.objects.filter(message=voice_msg, kind=MessageAttachment.KIND_VOICE_NOTE, duration=5).exists())
         report = self.post_json(f"/api/v1/group-messages/{msg.id}/report/", {"reason": "spam"})
         self.assertEqual(report.status_code, 200)
         self.assertTrue(GroupMessageReport.objects.filter(message=msg, reporter=self.alice).exists())
@@ -1193,6 +1257,8 @@ class PhaseEightProductionReadinessTests(TestCase):
         ]}
         complete_env["MANYUMBU_ENV"] = "production"
         self.assertEqual(validate_production_environment(complete_env), [])
+        with self.assertRaises(ImproperlyConfigured):
+            validate_production_environment({**complete_env, "SKIP_EMAIL_VERIFICATION": "True"})
 
     def test_data_export_requires_recent_auth_and_is_idempotent(self):
         denied = self.post_json("/api/v1/data-export/", {"recent_auth_confirmed": False})
@@ -1232,3 +1298,4 @@ class PhaseEightProductionReadinessTests(TestCase):
         if result["status"] == "skipped":
             self.assertEqual(result["reason"], "ffmpeg_unavailable")
             self.assertTrue(OperationalEvent.objects.filter(event_type="media_processing_unavailable").exists())
+
