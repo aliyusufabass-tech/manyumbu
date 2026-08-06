@@ -10,6 +10,7 @@ DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",") if host.strip()]
 
 INSTALLED_APPS = [
+    "corsheaders",
     "daphne",
     "channels",
     "django.contrib.admin",
@@ -23,6 +24,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -125,7 +127,15 @@ MANYUMBU_CALL_TIMEOUT_SECONDS = int(os.getenv("MANYUMBU_CALL_TIMEOUT_SECONDS", "
 
 # Phase 8 production-readiness configuration
 MANYUMBU_ENV = os.getenv("MANYUMBU_ENV", "development")
-CORS_ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()]
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:8081,http://localhost:8082",
+    ).split(",")
+    if origin.strip()
+]
+CORS_ALLOW_CREDENTIALS = True
 MANYUMBU_PUBLIC_APP_URL = os.getenv("MANYUMBU_PUBLIC_APP_URL", "")
 MANYUMBU_ADMIN_URL = os.getenv("MANYUMBU_ADMIN_URL", "")
 MANYUMBU_API_URL = os.getenv("MANYUMBU_API_URL", "")
