@@ -1,10 +1,10 @@
-import * as SecureStore from "expo-secure-store";
 import { api } from "./client";
+import { getTokenItem } from "../store/tokenStorage";
 import type { ApiResponse } from "../types/auth";
 import type { ActionPage, AppealPage, Call, CallConfig, CallPage, CallType, FeatureRestriction, ModerationAppeal, ProfessionalAccount, ProfessionalInsights, RestrictionPage, VerificationPage, VerificationRequest } from "../types/phase7";
 
-async function authHeader() { const token = await SecureStore.getItemAsync("manyumbu_access"); return token ? { Authorization: `Bearer ${token}` } : {}; }
-export async function getCallWsToken() { return SecureStore.getItemAsync("manyumbu_access"); }
+async function authHeader() { const token = await getTokenItem("manyumbu_access"); return token ? { Authorization: `Bearer ${token}` } : {}; }
+export async function getCallWsToken() { return getTokenItem("manyumbu_access"); }
 export async function listCalls(params: { status?: string; type?: string } = {}) { const { data } = await api.get<ApiResponse<CallPage>>("/calls/", { params, headers: await authHeader() }); return data; }
 export async function createCall(payload: { call_type: CallType; conversation_id?: string; group_id?: string }) { const { data } = await api.post<ApiResponse<{ call: Call }>>("/calls/", payload, { headers: await authHeader() }); return data; }
 export async function getCall(id: string) { const { data } = await api.get<ApiResponse<{ call: Call }>>(`/calls/${id}/`, { headers: await authHeader() }); return data; }

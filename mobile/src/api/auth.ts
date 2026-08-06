@@ -13,8 +13,15 @@ export type RegisterPayload = {
   accepted_privacy: boolean;
 };
 
+export type RegisterResponseData = {
+  user: ManyumbuUser;
+  requires_verification?: boolean;
+  access?: string;
+  refresh?: string;
+};
+
 export async function register(payload: RegisterPayload) {
-  const { data } = await api.post<ApiResponse<{ user: ManyumbuUser }>>("/auth/register/", payload);
+  const { data } = await api.post<ApiResponse<RegisterResponseData>>("/auth/register/", payload);
   return data;
 }
 

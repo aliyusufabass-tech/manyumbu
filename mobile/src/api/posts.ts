@@ -1,11 +1,11 @@
-import * as SecureStore from "expo-secure-store";
 import { api } from "./client";
+import { getTokenItem } from "../store/tokenStorage";
 import type { ApiResponse } from "../types/auth";
 import type { Comment, FeedPage, Post } from "../types/post";
 import type { Paginated } from "../types/profile";
 
 async function authHeader() {
-  const token = await SecureStore.getItemAsync("manyumbu_access");
+  const token = await getTokenItem("manyumbu_access");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

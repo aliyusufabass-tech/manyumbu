@@ -1,9 +1,9 @@
-import * as SecureStore from "expo-secure-store";
 import { api } from "./client";
+import { getTokenItem } from "../store/tokenStorage";
 import type { ApiResponse } from "../types/auth";
 import type { Reel, ReelList, Story, StoryTray } from "../types/phase4";
 
-async function authHeader() { const token = await SecureStore.getItemAsync("manyumbu_access"); return token ? { Authorization: `Bearer ${token}` } : {}; }
+async function authHeader() { const token = await getTokenItem("manyumbu_access"); return token ? { Authorization: `Bearer ${token}` } : {}; }
 
 export async function getStoryTray() { const { data } = await api.get<ApiResponse<StoryTray>>("/stories/tray/", { headers: await authHeader() }); return data; }
 export async function getStory(id: string) { const { data } = await api.get<ApiResponse<{ story: Story }>>(`/stories/${id}/`, { headers: await authHeader() }); return data; }

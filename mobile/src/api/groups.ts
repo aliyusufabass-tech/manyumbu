@@ -1,11 +1,11 @@
-import * as SecureStore from "expo-secure-store";
 import { api } from "./client";
+import { getTokenItem } from "../store/tokenStorage";
 import type { ApiResponse } from "../types/auth";
 import type { Paginated } from "../types/profile";
 import type { AppNotification, Group, GroupInvitation, GroupMember, GroupMessage, GroupMessagePage, GroupPage, JoinRequest, NotificationPreferences } from "../types/groups";
 
-async function authHeader() { const token = await SecureStore.getItemAsync("manyumbu_access"); return token ? { Authorization: `Bearer ${token}` } : {}; }
-export async function getGroupWsToken() { return SecureStore.getItemAsync("manyumbu_access"); }
+async function authHeader() { const token = await getTokenItem("manyumbu_access"); return token ? { Authorization: `Bearer ${token}` } : {}; }
+export async function getGroupWsToken() { return getTokenItem("manyumbu_access"); }
 export async function listGroups(params: { q?: string; archived?: boolean; type?: "public" } = {}) { const { data } = await api.get<ApiResponse<GroupPage>>("/groups/", { params: { q: params.q, archived: params.archived ? "1" : undefined, type: params.type }, headers: await authHeader() }); return data; }
 export async function createGroup(payload: { name: string; description?: string; privacy?: string; members?: string[] }) { const { data } = await api.post<ApiResponse<{ group: Group }>>("/groups/", payload, { headers: await authHeader() }); return data; }
 export async function getGroup(id: string) { const { data } = await api.get<ApiResponse<{ group: Group }>>(`/groups/${id}/`, { headers: await authHeader() }); return data; }

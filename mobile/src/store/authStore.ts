@@ -1,6 +1,6 @@
-import * as SecureStore from "expo-secure-store";
 import { create } from "zustand";
 import type { AuthTokens, ManyumbuUser } from "../types/auth";
+import { deleteTokenItem, setTokenItem } from "./tokenStorage";
 
 type AuthState = {
   user: ManyumbuUser | null;
@@ -13,13 +13,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   tokens: null,
   async setSession(user, tokens) {
-    await SecureStore.setItemAsync("manyumbu_access", tokens.access);
-    await SecureStore.setItemAsync("manyumbu_refresh", tokens.refresh);
+    await setTokenItem("manyumbu_access", tokens.access);
+    await setTokenItem("manyumbu_refresh", tokens.refresh);
     set({ user, tokens });
   },
   async signOut() {
-    await SecureStore.deleteItemAsync("manyumbu_access");
-    await SecureStore.deleteItemAsync("manyumbu_refresh");
+    await deleteTokenItem("manyumbu_access");
+    await deleteTokenItem("manyumbu_refresh");
     set({ user: null, tokens: null });
   },
 }));

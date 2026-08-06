@@ -1,15 +1,15 @@
-import * as SecureStore from "expo-secure-store";
 import { api } from "./client";
+import { getTokenItem } from "../store/tokenStorage";
 import type { ApiResponse } from "../types/auth";
 import type { ChatMessage, Conversation, CursorPage, MessageRequest } from "../types/messaging";
 import type { Paginated } from "../types/profile";
 
 async function authHeader() {
-  const token = await SecureStore.getItemAsync("manyumbu_access");
+  const token = await getTokenItem("manyumbu_access");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export async function getWsToken() { return SecureStore.getItemAsync("manyumbu_access"); }
+export async function getWsToken() { return getTokenItem("manyumbu_access"); }
 export async function listConversations(params: { cursor?: string | null; archived?: boolean; q?: string } = {}) { const { data } = await api.get<ApiResponse<CursorPage<Conversation>>>("/conversations/", { params: { cursor: params.cursor, archived: params.archived ? "1" : undefined, q: params.q }, headers: await authHeader() }); return data; }
 export async function startConversation(username: string, initial_text = "") { const { data } = await api.post<ApiResponse<{ conversation: Conversation; created: boolean; message_request_required: boolean }>>("/conversations/", { username, initial_text }, { headers: await authHeader() }); return data; }
 export async function getConversation(id: string) { const { data } = await api.get<ApiResponse<{ conversation: Conversation }>>(`/conversations/${id}/`, { headers: await authHeader() }); return data; }
