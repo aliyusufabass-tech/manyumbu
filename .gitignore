@@ -18,7 +18,7 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
-media/
+/media/
 staticfiles/
 
 # Node
