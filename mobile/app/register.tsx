@@ -5,6 +5,7 @@ import { Controller, useForm } from "react-hook-form";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { z } from "zod";
 import { register } from "../src/api/auth";
+import { useAuthStore } from "../src/store/authStore";
 
 const schema = z.object({
   full_name: z.string().min(2),
@@ -27,10 +28,16 @@ export default function RegisterScreen() {
     resolver: zodResolver(schema),
     defaultValues: { full_name: "", username: "", phone_number: "", email: "", date_of_birth: "", password: "", confirm_password: "", accepted_terms: true, accepted_privacy: true },
   });
+  const setSession = useAuthStore((state) => state.setSession);
   const mutation = useMutation({
     mutationFn: register,
-    onSuccess(result) {
-      router.push({ pathname: "/verify", params: { phone: result.data.user.phone_number } });
+    async onSuccess(result) {
+      if (!result.data.access || !result.data.refresh) {
+        router.replace("/login");
+        return;
+      }
+      await setSession(result.data.user, { access: result.data.access, refresh: result.data.refresh });
+      router.replace("/(tabs)/home");
     },
   });
 

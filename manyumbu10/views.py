@@ -6,6 +6,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
@@ -16,6 +17,7 @@ from .services import (
     complete_password_reset,
     create_email_code,
     create_password_reset_code,
+    ensure_profile_records,
     decode_token,
     hash_token,
     issue_tokens,
@@ -89,11 +91,19 @@ class RegisterView(View):
                     full_name=payload["full_name"],
                     date_of_birth=dob,
                     password=payload["password"],
-                    is_active=False,
-                    is_email_verified=False,
+                    is_active=True,
+                    is_email_verified=True,
                 )
-                create_email_code(user, request=request, device_name=payload.get("device_name", ""))
-            return response(True, "Account created. Check your email for the verification code.", {"user": public_user(user)}, status=201)
+                user.email_verified_at = timezone.now()
+                user.save(update_fields=["email_verified_at", "updated_at"])
+                ensure_profile_records(user)
+                tokens = issue_tokens(user, request=request, device_name=payload.get("device_name", ""))
+            return response(
+                True,
+                "Account created successfully.",
+                {"requires_verification": False, "access": tokens["access"], "refresh": tokens["refresh"], "user": public_user(user)},
+                status=201,
+            )
         except IntegrityError:
             return response(False, "Phone number, email, or username already exists.", status=409)
         except (ValueError, ValidationError) as exc:
@@ -152,7 +162,11 @@ class LoginView(View):
             if not user:
                 return response(False, "Invalid credentials.", status=401)
             if not user.is_active or not user.is_email_verified:
-                return response(False, "Please verify your email before signing in.", {"verification_required": True}, status=403)
+                user.is_active = True
+                user.is_email_verified = True
+                user.email_verified_at = user.email_verified_at or timezone.now()
+                user.save(update_fields=["is_active", "is_email_verified", "email_verified_at", "updated_at"])
+                ensure_profile_records(user)
             tokens = issue_tokens(user, request=request, device_name=payload.get("device_name", ""))
             return response(True, "Signed in successfully.", {"user": public_user(user), "tokens": tokens})
         except ValueError as exc:
