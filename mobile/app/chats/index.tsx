@@ -1,13 +1,46 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { useState } from "react";
-import { FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { useMemo, useState } from "react";
+import { FlatList, Pressable, SafeAreaView, Text, TextInput, View } from "react-native";
 import { conversationAction, listConversations } from "../../src/api/messaging";
+import { AppHeader } from "../../src/components/AppHeader";
+import { Avatar } from "../../src/components/Avatar";
+import { EmptyState } from "../../src/components/EmptyState";
+import { LoadingSkeleton } from "../../src/components/LoadingSkeleton";
+import { colors } from "../../src/theme/theme";
 import type { Conversation } from "../../src/types/messaging";
 
-function Row({ item, onArchive, onUnread }: { item: Conversation; onArchive: () => void; onUnread: () => void }) {
+function timeLabel(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  return sameDay ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function ConversationRow({ item, onArchive, onUnread }: { item: Conversation; onArchive: () => void; onUnread: () => void }) {
+  const peer = item.peer;
   const preview = item.last_message?.deleted_for_everyone_at ? "Message deleted" : item.last_message?.text || item.last_message?.message_type || "No messages yet";
-  return <Pressable onPress={() => router.push({ pathname: "/chats/[id]", params: { id: item.id } })} style={{ paddingVertical: 14, borderBottomWidth: 1, borderColor: "#E5E7EB", flexDirection: "row", gap: 12 }}><View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "#126C57", alignItems: "center", justifyContent: "center" }}><Text style={{ color: "white", fontWeight: "800" }}>{item.peer?.username?.[0]?.toUpperCase() ?? "M"}</Text></View><View style={{ flex: 1 }}><View style={{ flexDirection: "row", justifyContent: "space-between" }}><Text style={{ fontWeight: "800", fontSize: 16 }}>{item.peer?.full_name ?? "Conversation"}{item.peer?.is_verified ? " ?" : ""}</Text><Text style={{ color: "#6B7280", fontSize: 12 }}>{item.last_message_at ? new Date(item.last_message_at).toLocaleTimeString() : ""}</Text></View><Text numberOfLines={1} style={{ color: "#4B5563", marginTop: 3 }}>{item.request_state === "pending" ? "Message request" : preview}</Text><View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}><Pressable onPress={onArchive}><Text style={{ color: "#126C57", fontWeight: "700" }}>{item.archived ? "Unarchive" : "Archive"}</Text></Pressable><Pressable onPress={onUnread}><Text style={{ color: "#126C57", fontWeight: "700" }}>Unread</Text></Pressable>{item.muted_until ? <Text style={{ color: "#9CA3AF" }}>Muted</Text> : null}{item.unread_count ? <Text style={{ backgroundColor: "#E11D48", color: "white", paddingHorizontal: 8, borderRadius: 10 }}>{item.unread_count}</Text> : null}</View></View></Pressable>;
+  return (
+    <Pressable onPress={() => router.push({ pathname: "/chats/[id]", params: { id: item.id } })} style={({ pressed }) => ({ padding: 14, backgroundColor: colors.background, borderRadius: 16, borderWidth: 1, borderColor: colors.border, flexDirection: "row", gap: 12, opacity: pressed ? 0.86 : 1 })}>
+      <Avatar uri={peer?.profile_picture} name={peer?.full_name || peer?.username || "Manyumbu"} size={54} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text numberOfLines={1} style={{ flex: 1, color: colors.text, fontWeight: "900", fontSize: 16 }}>{peer?.full_name || peer?.username || "Conversation"} {peer?.is_verified ? <Ionicons name="checkmark-circle" size={14} color={colors.primary} /> : null}</Text>
+          <Text style={{ color: colors.muted, fontSize: 12 }}>{timeLabel(item.last_message_at)}</Text>
+        </View>
+        <Text numberOfLines={1} style={{ color: item.unread_count ? colors.text : colors.muted, marginTop: 4, fontWeight: item.unread_count ? "800" : "500" }}>{item.request_state === "pending" ? "Message request" : preview}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginTop: 10 }}>
+          <Pressable onPress={onArchive} hitSlop={8}><Text style={{ color: colors.primary, fontWeight: "800" }}>{item.archived ? "Unarchive" : "Archive"}</Text></Pressable>
+          <Pressable onPress={onUnread} hitSlop={8}><Text style={{ color: colors.primary, fontWeight: "800" }}>Unread</Text></Pressable>
+          {item.muted_until ? <Text style={{ color: colors.muted }}>Muted</Text> : null}
+          <View style={{ flex: 1 }} />
+          {item.unread_count ? <Text style={{ backgroundColor: colors.primary, color: "white", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, overflow: "hidden", fontWeight: "900" }}>{item.unread_count}</Text> : null}
+        </View>
+      </View>
+    </Pressable>
+  );
 }
 
 export default function ChatsScreen() {
@@ -16,5 +49,39 @@ export default function ChatsScreen() {
   const client = useQueryClient();
   const query = useQuery({ queryKey: ["conversations", q, archived], queryFn: () => listConversations({ q, archived }) });
   const action = useMutation({ mutationFn: ({ id, name }: { id: string; name: "archive" | "unarchive" | "unread" }) => conversationAction(id, name), onSuccess: () => client.invalidateQueries({ queryKey: ["conversations"] }) });
-  return <View style={{ flex: 1, backgroundColor: "#FFFFFF", paddingTop: 48, paddingHorizontal: 18 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}><Text style={{ fontSize: 28, fontWeight: "900" }}>Chats</Text><Pressable onPress={() => router.push("/chats/start")}><Text style={{ color: "#126C57", fontWeight: "900" }}>New</Text></Pressable></View><View style={{ flexDirection: "row", gap: 10, marginVertical: 12 }}><TextInput value={q} onChangeText={setQ} placeholder="Search conversations" style={{ flex: 1, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8, padding: 12 }} /><Pressable onPress={() => setArchived(!archived)} style={{ justifyContent: "center" }}><Text style={{ color: "#126C57", fontWeight: "800" }}>{archived ? "Inbox" : "Archived"}</Text></Pressable></View><View style={{ flexDirection: "row", gap: 16, marginBottom: 8 }}><Pressable onPress={() => router.push("/chats/requests")}><Text style={{ color: "#126C57", fontWeight: "800" }}>Message requests</Text></Pressable><Pressable onPress={() => router.push("/groups")}><Text style={{ color: "#126C57", fontWeight: "800" }}>Groups</Text></Pressable><Pressable onPress={() => router.push("/notifications")}><Text style={{ color: "#126C57", fontWeight: "800" }}>Notifications</Text></Pressable></View>{query.isLoading ? <Text>Loading conversations...</Text> : null}{query.isError ? <Text>Conversations could not be loaded.</Text> : null}<FlatList data={query.data?.data.results ?? []} keyExtractor={(item) => item.id} refreshing={query.isFetching} onRefresh={() => query.refetch()} ListEmptyComponent={<Text style={{ color: "#6B7280", marginTop: 24 }}>No conversations yet.</Text>} renderItem={({ item }) => <Row item={item} onArchive={() => action.mutate({ id: item.id, name: item.archived ? "unarchive" : "archive" })} onUnread={() => action.mutate({ id: item.id, name: "unread" })} />} /></View>;
+  const conversations = useMemo(() => query.data?.data.results ?? [], [query.data]);
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.soft }}>
+      <AppHeader title="Chats" subtitle={archived ? "Archived conversations" : "Messages and requests"} actions={[{ icon: "create-outline", label: "New chat", onPress: () => router.push("/chats/start") }]} />
+      <View style={{ padding: 14, gap: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.background, borderRadius: 16, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14 }}>
+          <Ionicons name="search-outline" size={20} color={colors.muted} />
+          <TextInput value={q} onChangeText={setQ} placeholder="Search conversations" placeholderTextColor={colors.muted} autoCapitalize="none" style={{ flex: 1, height: 50, color: colors.text, fontSize: 16 }} />
+          {q ? <Pressable onPress={() => setQ("")}><Ionicons name="close-circle" size={20} color={colors.muted} /></Pressable> : null}
+        </View>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Pressable onPress={() => setArchived(false)} style={{ flex: 1, paddingVertical: 11, borderRadius: 999, backgroundColor: archived ? colors.background : colors.primary, borderWidth: 1, borderColor: archived ? colors.border : colors.primary }}><Text style={{ color: archived ? colors.text : "white", textAlign: "center", fontWeight: "900" }}>Inbox</Text></Pressable>
+          <Pressable onPress={() => setArchived(true)} style={{ flex: 1, paddingVertical: 11, borderRadius: 999, backgroundColor: archived ? colors.primary : colors.background, borderWidth: 1, borderColor: archived ? colors.primary : colors.border }}><Text style={{ color: archived ? "white" : colors.text, textAlign: "center", fontWeight: "900" }}>Archived</Text></Pressable>
+        </View>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Pressable onPress={() => router.push("/chats/requests")} style={{ flex: 1, padding: 12, borderRadius: 14, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}><Text style={{ color: colors.primary, fontWeight: "900", textAlign: "center" }}>Requests</Text></Pressable>
+          <Pressable onPress={() => router.push("/groups")} style={{ flex: 1, padding: 12, borderRadius: 14, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}><Text style={{ color: colors.primary, fontWeight: "900", textAlign: "center" }}>Groups</Text></Pressable>
+        </View>
+      </View>
+      {query.isLoading ? <LoadingSkeleton rows={4} /> : null}
+      {query.isError ? <EmptyState icon="cloud-offline-outline" title="Chats could not be loaded" message="Check your connection and try again." actionLabel="Retry" onAction={() => query.refetch()} /> : null}
+      {!query.isLoading && !query.isError ? (
+        <FlatList
+          data={conversations}
+          keyExtractor={(item) => item.id}
+          refreshing={query.isFetching}
+          onRefresh={() => query.refetch()}
+          contentContainerStyle={{ padding: 14, gap: 12, paddingBottom: 90 }}
+          ListEmptyComponent={<EmptyState icon="chatbubble-ellipses-outline" title={q ? "No conversations found" : "No conversations yet"} message={q ? "Try another name or username." : "Start a private chat or reply to message requests."} actionLabel="New chat" onAction={() => router.push("/chats/start")} />}
+          renderItem={({ item }) => <ConversationRow item={item} onArchive={() => action.mutate({ id: item.id, name: item.archived ? "unarchive" : "archive" })} onUnread={() => action.mutate({ id: item.id, name: "unread" })} />}
+        />
+      ) : null}
+    </SafeAreaView>
+  );
 }

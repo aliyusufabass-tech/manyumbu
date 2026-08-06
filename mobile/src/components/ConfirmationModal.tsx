@@ -1,0 +1,7 @@
+﻿import { Modal, Pressable, Text, View } from "react-native";
+import { colors } from "../theme/theme";
+import { PrimaryButton } from "./PrimaryButton";
+
+export function ConfirmationModal({ visible, title, message, confirmLabel = "Confirm", danger, onConfirm, onCancel }: { visible: boolean; title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void; onCancel: () => void }) {
+  return <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}><Pressable onPress={onCancel} style={{ flex: 1, backgroundColor: "rgba(17,24,39,0.42)", justifyContent: "center", padding: 24 }}><Pressable style={{ backgroundColor: colors.background, borderRadius: 20, padding: 20, gap: 12 }}><Text style={{ color: colors.text, fontSize: 20, fontWeight: "900" }}>{title}</Text><Text style={{ color: colors.muted, lineHeight: 22 }}>{message}</Text><View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}><View style={{ flex: 1 }}><PrimaryButton title="Cancel" variant="secondary" onPress={onCancel} /></View><View style={{ flex: 1 }}><PrimaryButton title={confirmLabel} variant={danger ? "danger" : "primary"} onPress={onConfirm} /></View></View></Pressable></Pressable></Modal>;
+}

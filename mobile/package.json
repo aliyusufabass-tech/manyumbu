@@ -23,10 +23,12 @@
     "expo-router": "^5.1.4",
     "expo-secure-store": "^14.2.3",
     "react": "19.0.0",
+    "react-dom": "19.0.0",
     "react-hook-form": "^7.62.0",
     "react-native": "0.79.6",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
+    "react-native-web": "^0.20.0",
     "socket.io-client": "^4.8.1",
     "zod": "^4.0.14",
     "zustand": "^5.0.7"
